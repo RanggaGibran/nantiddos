@@ -2,13 +2,13 @@ package id.nantiddos;
 
 import id.nantiddos.analytics.SecurityMetrics;
 import id.nantiddos.dashboard.SecurityConsole;
+import id.nantiddos.network.ProxyIntegration;
 import id.nantiddos.notification.NotificationManager;
 import id.nantiddos.protection.AttackDetector;
 import id.nantiddos.protection.ConnectionTracker;
 import id.nantiddos.protection.ConnectionTracker.ConnectionType;
 import id.nantiddos.protection.IPManager;
 import id.nantiddos.protection.PacketMonitor;
-
 
 import java.io.File;
 import java.util.List;
@@ -45,6 +45,7 @@ public class Nantiddos extends JavaPlugin implements Listener {
     private AttackDetector attackDetector;
     private NotificationManager notificationManager;
     private SecurityMetrics securityMetrics;
+    private ProxyIntegration proxyIntegration;
     
     private int maxConnectionsPerSecond;
     private int connectionTimeout;
@@ -85,6 +86,9 @@ public class Nantiddos extends JavaPlugin implements Listener {
             
             securityConsole = new SecurityConsole(this, connectionTracker, ipManager, packetMonitor);
             logger.info("Security dashboard initialized");
+            
+            proxyIntegration = new ProxyIntegration(this);
+            logger.info("Network protection system initialized");
         }, 40L);
         
         logger.info("NantiDDoS v" + getDescription().getVersion() + " enabled successfully");
@@ -121,6 +125,10 @@ public class Nantiddos extends JavaPlugin implements Listener {
             securityConsole.shutdown();
         }
         
+        if (proxyIntegration != null) {
+            proxyIntegration.shutdown();
+        }
+        
         logger.info("NantiDDoS disabled");
         saveConfig();
     }
@@ -153,6 +161,10 @@ public class Nantiddos extends JavaPlugin implements Listener {
         return securityMetrics;
     }
     
+    public ProxyIntegration getProxyIntegration() {
+        return proxyIntegration;
+    }
+    
     public boolean getEnableProtection() {
         return enableProtection;
     }
@@ -181,6 +193,28 @@ public class Nantiddos extends JavaPlugin implements Listener {
         kickMessage = config.getString("messages.kick-message", "§c§lConnection throttled! Please wait before reconnecting.");
         blacklistedMessage = config.getString("messages.blacklisted-ip-message", "§c§lYour IP address is blacklisted from this server.");
         packetFloodMessage = config.getString("messages.packet-flood-message", "§c§lYou have been kicked for sending too many packets to the server.");
+        
+        if (!config.contains("network.server-id")) {
+            config.set("network.server-id", "");
+        }
+        if (!config.contains("network.network-id")) {
+            config.set("network.network-id", "default");
+        }
+        if (!config.contains("network.sync-interval-seconds")) {
+            config.set("network.sync-interval-seconds", 30);
+        }
+        if (!config.contains("network.sync-blacklist")) {
+            config.set("network.sync-blacklist", true);
+        }
+        if (!config.contains("network.sync-whitelist")) {
+            config.set("network.sync-whitelist", true);
+        }
+        if (!config.contains("network.sync-attack-data")) {
+            config.set("network.sync-attack-data", true);
+        }
+        if (!config.contains("network.master-server")) {
+            config.set("network.master-server", false);
+        }
         
         saveConfig();
     }
@@ -222,6 +256,9 @@ public class Nantiddos extends JavaPlugin implements Listener {
                 case "packets":
                     handlePacketsCommand(sender, args);
                     break;
+                case "network":
+                    handleNetworkCommand(sender, args);
+                    break;
                 case "dashboard":
                 case "gui":
                     if (!(sender instanceof Player)) {
@@ -246,62 +283,126 @@ public class Nantiddos extends JavaPlugin implements Listener {
             return true;
         });
     }
-    private void handleAnalyticsCommand(CommandSender sender, String[] args) {
-    if (!sender.hasPermission("nantiddos.admin")) {
-        sender.sendMessage("§cYou don't have permission to use this command.");
-        return;
-    }
     
-    if (securityMetrics == null) {
-        sender.sendMessage("§cAnalytics system is not initialized yet. Please try again later.");
-        return;
-    }
-    
-    if (args.length < 2) {
-        sender.sendMessage("§6========== §eNantiDDoS Analytics §6==========");
-        sender.sendMessage("§e/nantiddos analytics report daily §7- View today's security summary");
-        sender.sendMessage("§e/nantiddos analytics report weekly §7- View this week's security summary");
-        sender.sendMessage("§e/nantiddos analytics report custom <start> <end> §7- Generate a custom report");
-        sender.sendMessage("§e/nantiddos analytics list §7- List available reports");
-        return;
-    }
-    
-    switch (args[1].toLowerCase()) {
-        case "report":
-            if (args.length < 3) {
-                sender.sendMessage("§cPlease specify the report type (daily, weekly, custom).");
-                return;
-            }
-            
-            switch (args[2].toLowerCase()) {
-                case "daily":
-                    showDailyAnalytics(sender);
-                    break;
-                case "weekly":
-                    showWeeklyAnalytics(sender);
-                    break;
-                case "custom":
-                    if (args.length < 5) {
-                        sender.sendMessage("§cUsage: /nantiddos analytics report custom <start-date> <end-date>");
-                        sender.sendMessage("§cDates should be in yyyy-MM-dd format.");
-                        return;
+    private void handleNetworkCommand(CommandSender sender, String[] args) {
+        if (!sender.hasPermission("nantiddos.admin")) {
+            sender.sendMessage("§cYou don't have permission to use this command.");
+            return;
+        }
+        
+        if (proxyIntegration == null) {
+            sender.sendMessage("§cNetwork system is not initialized yet. Please try again later.");
+            return;
+        }
+        
+        if (args.length < 2) {
+            sender.sendMessage("§6========== §eNantiDDoS Network Commands §6==========");
+            sender.sendMessage("§e/nantiddos network status §7- Show network status");
+            sender.sendMessage("§e/nantiddos network sync §7- Force synchronize data now");
+            sender.sendMessage("§e/nantiddos network master <true|false> §7- Set this server as master");
+            return;
+        }
+        
+        switch (args[1].toLowerCase()) {
+            case "status":
+                sender.sendMessage("§6========== §eNetwork Status §6==========");
+                sender.sendMessage("§eProxy Type: §f" + proxyIntegration.getProxyType());
+                sender.sendMessage("§eProxy Enabled: §f" + proxyIntegration.isProxyEnabled());
+                sender.sendMessage("§eServer ID: §f" + config.getString("network.server-id"));
+                sender.sendMessage("§eNetwork ID: §f" + config.getString("network.network-id"));
+                sender.sendMessage("§eIs Master: §f" + proxyIntegration.isMasterServer());
+                sender.sendMessage("§eMaster Server ID: §f" + proxyIntegration.getMasterServerId());
+                sender.sendMessage("§eNetwork Servers: §f" + proxyIntegration.getNetworkServers().size());
+                break;
+                
+            case "sync":
+                sender.sendMessage("§aForcing network data synchronization...");
+                Bukkit.getScheduler().runTaskAsynchronously(this, () -> {
+                    if (proxyIntegration.isMasterServer()) {
+                        sender.sendMessage("§aBroadcasting data as master server...");
+                    } else {
+                        sender.sendMessage("§aSending data to master server...");
                     }
-                    String result = securityMetrics.generateCustomReport(args[3], args[4]);
-                    sender.sendMessage("§e" + result);
-                    break;
-                default:
-                    sender.sendMessage("§cUnknown report type. Options: daily, weekly, custom");
-                    break;
-            }
-            break;
-        case "list":
-            listReports(sender);
-            break;
-        default:
-            sender.sendMessage("§cUnknown analytics subcommand. Try /nantiddos analytics");
-            break;
+                });
+                break;
+                
+            case "master":
+                if (args.length < 3) {
+                    sender.sendMessage("§cUsage: /nantiddos network master <true|false>");
+                    return;
+                }
+                
+                boolean setAsMaster = Boolean.parseBoolean(args[2]);
+                config.set("network.master-server", setAsMaster);
+                saveConfig();
+                
+                sender.sendMessage("§aServer master status set to: §e" + setAsMaster);
+                sender.sendMessage("§aReload the plugin to apply this change: §e/nantiddos reload");
+                break;
+                
+            default:
+                sender.sendMessage("§cUnknown network subcommand. Try /nantiddos network");
+                break;
+        }
     }
-}
+    
+    private void handleAnalyticsCommand(CommandSender sender, String[] args) {
+        if (!sender.hasPermission("nantiddos.admin")) {
+            sender.sendMessage("§cYou don't have permission to use this command.");
+            return;
+        }
+        
+        if (securityMetrics == null) {
+            sender.sendMessage("§cAnalytics system is not initialized yet. Please try again later.");
+            return;
+        }
+        
+        if (args.length < 2) {
+            sender.sendMessage("§6========== §eNantiDDoS Analytics §6==========");
+            sender.sendMessage("§e/nantiddos analytics report daily §7- View today's security summary");
+            sender.sendMessage("§e/nantiddos analytics report weekly §7- View this week's security summary");
+            sender.sendMessage("§e/nantiddos analytics report custom <start> <end> §7- Generate a custom report");
+            sender.sendMessage("§e/nantiddos analytics list §7- List available reports");
+            return;
+        }
+        
+        switch (args[1].toLowerCase()) {
+            case "report":
+                if (args.length < 3) {
+                    sender.sendMessage("§cPlease specify the report type (daily, weekly, custom).");
+                    return;
+                }
+                
+                switch (args[2].toLowerCase()) {
+                    case "daily":
+                        showDailyAnalytics(sender);
+                        break;
+                    case "weekly":
+                        showWeeklyAnalytics(sender);
+                        break;
+                    case "custom":
+                        if (args.length < 5) {
+                            sender.sendMessage("§cUsage: /nantiddos analytics report custom <start-date> <end-date>");
+                            sender.sendMessage("§cDates should be in yyyy-MM-dd format.");
+                            return;
+                        }
+                        String result = securityMetrics.generateCustomReport(args[3], args[4]);
+                        sender.sendMessage("§e" + result);
+                        break;
+                    default:
+                        sender.sendMessage("§cUnknown report type. Options: daily, weekly, custom");
+                        break;
+                }
+                break;
+            case "list":
+                listReports(sender);
+                break;
+            default:
+                sender.sendMessage("§cUnknown analytics subcommand. Try /nantiddos analytics");
+                break;
+        }
+    }
+
     private void handlePacketsCommand(CommandSender sender, String[] args) {
         if (packetMonitor == null) {
             sender.sendMessage("§cPacket monitoring system is not initialized yet.");
@@ -345,75 +446,75 @@ public class Nantiddos extends JavaPlugin implements Listener {
     }
 
     private void showDailyAnalytics(CommandSender sender) {
-    Map<String, Object> data = securityMetrics.generateAnalyticsData();
-    
-    sender.sendMessage("§6========== §eNantiDDoS Daily Analytics §6==========");
-    sender.sendMessage("§eCurrent Threat Level: §c" + data.get("currentThreatLevel") + " (" + data.get("currentAlertLevel") + ")");
-    sender.sendMessage("§eActive Attack Sources: §c" + data.get("activeAttackSources"));
-    
-    @SuppressWarnings("unchecked")
-    List<Map<String, Object>> dailyData = (List<Map<String, Object>>) data.get("dailyData");
-    if (dailyData != null && !dailyData.isEmpty()) {
-        Map<String, Object> today = dailyData.get(0);
-        sender.sendMessage("§eToday's Statistics:");
-        sender.sendMessage("§7- Average Connections: §f" + today.get("avgConnections"));
-        sender.sendMessage("§7- Maximum Connections: §f" + today.get("maxConnections"));
-        sender.sendMessage("§7- Maximum Threat Level: §f" + today.get("maxThreat"));
-        sender.sendMessage("§7- Attack Count: §f" + today.get("attackCount"));
-    }
-    
-    sender.sendMessage("§eDetailed reports available in plugins/NantiDDoS/reports/");
-}
-
-private void showWeeklyAnalytics(CommandSender sender) {
-    Map<String, Object> data = securityMetrics.generateAnalyticsData();
-    
-    sender.sendMessage("§6========== §eNantiDDoS Weekly Analytics §6==========");
-    sender.sendMessage("§eTotal Connections: §f" + data.get("totalConnections"));
-    sender.sendMessage("§eMax Connections: §f" + data.get("maxConnections"));
-    sender.sendMessage("§eTotal Attacks: §c" + data.get("totalAttacks"));
-    sender.sendMessage("§eHigh Severity Attacks: §c" + data.get("highSeverityAttacks"));
-    
-    @SuppressWarnings("unchecked")
-    List<Map<String, Object>> attackTypes = (List<Map<String, Object>>) data.get("attackTypes");
-    if (attackTypes != null && !attackTypes.isEmpty()) {
-        sender.sendMessage("§eAttack Types:");
-        for (Map<String, Object> type : attackTypes) {
-            sender.sendMessage("§7- " + type.get("type") + ": §c" + type.get("count"));
-        }
-    }
-    
-    sender.sendMessage("§eDetailed reports available in plugins/NantiDDoS/reports/");
-}
-
-private void listReports(CommandSender sender) {
-    List<Map<String, String>> reports = securityMetrics.getReportHistory();
-    
-    sender.sendMessage("§6========== §eNantiDDoS Report History §6==========");
-    if (reports.isEmpty()) {
-        sender.sendMessage("§7No reports available.");
-        return;
-    }
-    
-    int count = 0;
-    for (Map<String, String> report : reports) {
-        if (count++ >= 10) {
-            sender.sendMessage("§7... and " + (reports.size() - 10) + " more reports.");
-            break;
+        Map<String, Object> data = securityMetrics.generateAnalyticsData();
+        
+        sender.sendMessage("§6========== §eNantiDDoS Daily Analytics §6==========");
+        sender.sendMessage("§eCurrent Threat Level: §c" + data.get("currentThreatLevel") + " (" + data.get("currentAlertLevel") + ")");
+        sender.sendMessage("§eActive Attack Sources: §c" + data.get("activeAttackSources"));
+        
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> dailyData = (List<Map<String, Object>>) data.get("dailyData");
+        if (dailyData != null && !dailyData.isEmpty()) {
+            Map<String, Object> today = dailyData.get(0);
+            sender.sendMessage("§eToday's Statistics:");
+            sender.sendMessage("§7- Average Connections: §f" + today.get("avgConnections"));
+            sender.sendMessage("§7- Maximum Connections: §f" + today.get("maxConnections"));
+            sender.sendMessage("§7- Maximum Threat Level: §f" + today.get("maxThreat"));
+            sender.sendMessage("§7- Attack Count: §f" + today.get("attackCount"));
         }
         
-        String fileName = report.getOrDefault("fileName", report.getOrDefault("path", "Unknown"));
-        if (fileName.contains("\\")) {
-            fileName = fileName.substring(fileName.lastIndexOf('\\') + 1);
-        }
-        String date = report.getOrDefault("date", report.getOrDefault("timestamp", "Unknown"));
-        String size = report.getOrDefault("size", "Unknown");
-        
-        sender.sendMessage("§e" + fileName + " §7- §f" + date + " §7(§f" + size + "§7)");
+        sender.sendMessage("§eDetailed reports available in plugins/NantiDDoS/reports/");
     }
-    
-    sender.sendMessage("§7Reports are stored in plugins/NantiDDoS/reports/");
-}
+
+    private void showWeeklyAnalytics(CommandSender sender) {
+        Map<String, Object> data = securityMetrics.generateAnalyticsData();
+        
+        sender.sendMessage("§6========== §eNantiDDoS Weekly Analytics §6==========");
+        sender.sendMessage("§eTotal Connections: §f" + data.get("totalConnections"));
+        sender.sendMessage("§eMax Connections: §f" + data.get("maxConnections"));
+        sender.sendMessage("§eTotal Attacks: §c" + data.get("totalAttacks"));
+        sender.sendMessage("§eHigh Severity Attacks: §c" + data.get("highSeverityAttacks"));
+        
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> attackTypes = (List<Map<String, Object>>) data.get("attackTypes");
+        if (attackTypes != null && !attackTypes.isEmpty()) {
+            sender.sendMessage("§eAttack Types:");
+            for (Map<String, Object> type : attackTypes) {
+                sender.sendMessage("§7- " + type.get("type") + ": §c" + type.get("count"));
+            }
+        }
+        
+        sender.sendMessage("§eDetailed reports available in plugins/NantiDDoS/reports/");
+    }
+
+    private void listReports(CommandSender sender) {
+        List<Map<String, String>> reports = securityMetrics.getReportHistory();
+        
+        sender.sendMessage("§6========== §eNantiDDoS Report History §6==========");
+        if (reports.isEmpty()) {
+            sender.sendMessage("§7No reports available.");
+            return;
+        }
+        
+        int count = 0;
+        for (Map<String, String> report : reports) {
+            if (count++ >= 10) {
+                sender.sendMessage("§7... and " + (reports.size() - 10) + " more");
+                break;
+            }
+            
+            String fileName = report.getOrDefault("fileName", report.getOrDefault("path", "Unknown"));
+            if (fileName.contains("\\")) {
+                fileName = fileName.substring(fileName.lastIndexOf('\\') + 1);
+            }
+            String date = report.getOrDefault("date", report.getOrDefault("timestamp", "Unknown"));
+            String size = report.getOrDefault("size", "Unknown");
+            
+            sender.sendMessage("§e" + fileName + " §7- §f" + date + " §7(§f" + size + "§7)");
+        }
+        
+        sender.sendMessage("§7Reports are stored in plugins/NantiDDoS/reports/");
+    }
     
     private void handleWhitelistCommand(CommandSender sender, String[] args) {
         if (args.length < 2) {
@@ -424,41 +525,41 @@ private void listReports(CommandSender sender) {
         switch (args[1].toLowerCase()) {
             case "add":
                 if (args.length < 3) {
-                    sender.sendMessage("§c§lUsage: §e/nantiddos whitelist add <ip|cidr>");
+                    sender.sendMessage("§c§lUsage: §e/nantiddos whitelist add <ip>");
                     return;
                 }
                 
                 String ipToWhitelist = args[2];
                 if (ipManager.addToWhitelist(ipToWhitelist)) {
-                    sender.sendMessage("§aAdded §e" + ipToWhitelist + " §ato whitelist");
+                    sender.sendMessage("§a" + ipToWhitelist + " added to whitelist.");
                 } else {
-                    sender.sendMessage("§cInvalid IP or CIDR notation: §e" + ipToWhitelist);
+                    sender.sendMessage("§cInvalid IP or CIDR notation: " + ipToWhitelist);
                 }
                 break;
                 
             case "remove":
                 if (args.length < 3) {
-                    sender.sendMessage("§c§lUsage: §e/nantiddos whitelist remove <ip|cidr>");
+                    sender.sendMessage("§c§lUsage: §e/nantiddos whitelist remove <ip>");
                     return;
                 }
                 
                 String ipToRemove = args[2];
                 if (ipManager.removeFromWhitelist(ipToRemove)) {
-                    sender.sendMessage("§aRemoved §e" + ipToRemove + " §afrom whitelist");
+                    sender.sendMessage("§a" + ipToRemove + " removed from whitelist.");
                 } else {
-                    sender.sendMessage("§cIP or CIDR not found in whitelist: §e" + ipToRemove);
+                    sender.sendMessage("§c" + ipToRemove + " not found in whitelist.");
                 }
                 break;
                 
             case "list":
                 sender.sendMessage("§6========== §eWhitelisted IPs §6==========");
                 for (String ip : ipManager.getWhitelistedIps()) {
-                    sender.sendMessage("§a" + ip);
+                    sender.sendMessage("§f- " + ip);
                 }
                 
                 sender.sendMessage("§6========== §eWhitelisted Networks §6==========");
                 for (String network : ipManager.getWhitelistedNetworks()) {
-                    sender.sendMessage("§a" + network);
+                    sender.sendMessage("§f- " + network);
                 }
                 break;
                 
@@ -478,41 +579,41 @@ private void listReports(CommandSender sender) {
         switch (args[1].toLowerCase()) {
             case "add":
                 if (args.length < 3) {
-                    sender.sendMessage("§c§lUsage: §e/nantiddos blacklist add <ip|cidr>");
+                    sender.sendMessage("§c§lUsage: §e/nantiddos blacklist add <ip>");
                     return;
                 }
                 
                 String ipToBlacklist = args[2];
                 if (ipManager.addToBlacklist(ipToBlacklist)) {
-                    sender.sendMessage("§aAdded §e" + ipToBlacklist + " §ato blacklist");
+                    sender.sendMessage("§a" + ipToBlacklist + " added to blacklist.");
                 } else {
-                    sender.sendMessage("§cInvalid IP or CIDR notation: §e" + ipToBlacklist);
+                    sender.sendMessage("§cInvalid IP or CIDR notation: " + ipToBlacklist);
                 }
                 break;
                 
             case "remove":
                 if (args.length < 3) {
-                    sender.sendMessage("§c§lUsage: §e/nantiddos blacklist remove <ip|cidr>");
+                    sender.sendMessage("§c§lUsage: §e/nantiddos blacklist remove <ip>");
                     return;
                 }
                 
                 String ipToRemove = args[2];
                 if (ipManager.removeFromBlacklist(ipToRemove)) {
-                    sender.sendMessage("§aRemoved §e" + ipToRemove + " §afrom blacklist");
+                    sender.sendMessage("§a" + ipToRemove + " removed from blacklist.");
                 } else {
-                    sender.sendMessage("§cIP or CIDR not found in blacklist: §e" + ipToRemove);
+                    sender.sendMessage("§c" + ipToRemove + " not found in blacklist.");
                 }
                 break;
                 
             case "list":
                 sender.sendMessage("§6========== §eBlacklisted IPs §6==========");
                 for (String ip : ipManager.getBlacklistedIps()) {
-                    sender.sendMessage("§c" + ip);
+                    sender.sendMessage("§f- " + ip);
                 }
                 
                 sender.sendMessage("§6========== §eBlacklisted Networks §6==========");
                 for (String network : ipManager.getBlacklistedNetworks()) {
-                    sender.sendMessage("§c" + network);
+                    sender.sendMessage("§f- " + network);
                 }
                 break;
                 
@@ -537,6 +638,7 @@ private void listReports(CommandSender sender) {
         sender.sendMessage("§e/nantiddos whitelist <add|remove|list> [ip] §7- Manage whitelist");
         sender.sendMessage("§e/nantiddos blacklist <add|remove|list> [ip] §7- Manage blacklist");
         sender.sendMessage("§e/nantiddos packets <info|kick> [player] §7- Packet analysis commands");
+        sender.sendMessage("§e/nantiddos network §7- Network-wide protection commands");
         sender.sendMessage("§e/nantiddos dashboard §7- Open security dashboard GUI");
         sender.sendMessage("§e/nantiddos analytics §7- View security analytics");
     }
@@ -567,6 +669,10 @@ private void listReports(CommandSender sender) {
         
         if (securityMetrics != null) {
             securityMetrics.loadConfig();
+        }
+        
+        if (proxyIntegration != null) {
+            proxyIntegration.loadConfig();
         }
         
         sender.sendMessage("§aNantiDDoS configuration reloaded successfully!");
@@ -617,6 +723,14 @@ private void listReports(CommandSender sender) {
         } else {
             sender.sendMessage("§eAnalytics: §cNot Initialized");
         }
+        
+        if (proxyIntegration != null) {
+            sender.sendMessage("§eNetwork Mode: " + (proxyIntegration.isProxyEnabled() ? "§aEnabled (" + proxyIntegration.getProxyType() + ")" : "§cDisabled"));
+            sender.sendMessage("§eServer Role: " + (proxyIntegration.isMasterServer() ? "§aMaster" : "§eNode"));
+            sender.sendMessage("§eNetwork Servers: §a" + proxyIntegration.getNetworkServers().size());
+        } else {
+            sender.sendMessage("§eNetwork Mode: §cNot Initialized");
+        }
     }
     
     private void toggleProtection(CommandSender sender, boolean enable) {
@@ -634,6 +748,10 @@ private void listReports(CommandSender sender) {
         
         if (attackDetector != null) {
             attackDetector.enableProtection(enable);
+        }
+        
+        if (proxyIntegration != null) {
+            proxyIntegration.enableProtection(enable);
         }
         
         sender.sendMessage("§aNantiDDoS protection " + (enable ? "enabled" : "disabled") + "!");
@@ -667,7 +785,7 @@ private void listReports(CommandSender sender) {
             
             if (connectionTracker.shouldThrottleConnection(event.getAddress())) {
                 event.setMaxPlayers(0);
-                event.setMotd("§c§lConnection throttled! Please wait before reconnecting.");
+                event.setMotd("§c§lSlow down! Connection throttled.");
             }
         }
     }
@@ -689,8 +807,6 @@ private void listReports(CommandSender sender) {
                 event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_OTHER, kickMessage);
                 notifyAdmins("§c[NantiDDoS] §eBlocked connection attempt from §c" + 
                             event.getAddress().getHostAddress() + " §e(rate limit exceeded)");
-                logger.warning("Blocked connection from " + event.getAddress().getHostAddress() + 
-                              " (rate limit exceeded)");
             }
         }
     }
@@ -714,9 +830,18 @@ private void listReports(CommandSender sender) {
         }
         
         if (player.hasPermission("nantiddos.admin") && notifyAdmins) {
-            Bukkit.getScheduler().runTaskLater(Nantiddos.this, () -> {
-                player.sendMessage("§a[NantiDDoS] §eProtection is currently " + 
-                    (enableProtection ? "§aENABLED" : "§cDISABLED"));
+            Bukkit.getScheduler().runTaskLater(this, () -> {
+                if (attackDetector != null && attackDetector.getCurrentThreatLevel() >= 50) {
+                    player.sendMessage("§c[NantiDDoS] §eWARNING: Current threat level is §c" + 
+                                      attackDetector.getSystemAlertLevel().name() + " §e(" + 
+                                      attackDetector.getCurrentThreatLevel() + "/100)");
+                }
+                
+                if (connectionTracker != null && connectionTracker.getSuspiciousConnectionsCount() > 5) {
+                    player.sendMessage("§c[NantiDDoS] §eThere are §c" + 
+                                      connectionTracker.getSuspiciousConnectionsCount() + 
+                                      " §esuspicious IPs currently tracked.");
+                }
             }, 20L);
         }
     }

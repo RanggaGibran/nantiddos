@@ -79,6 +79,16 @@ notifications:
     from: nantiddos@example.com
     recipients:
       - admin@example.com
+
+network:
+  server-id: ""
+  network-id: "default"
+  sync-interval-seconds: 30
+  sync-blacklist: true
+  sync-whitelist: true
+  sync-attack-data: true
+  master-server: false
+  master-server-id: ""
   
 messages:
   kick-message: "§c§lConnection throttled! Please wait before reconnecting."
