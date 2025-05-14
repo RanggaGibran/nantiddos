@@ -322,5 +322,9 @@ public class ConnectionTracker {
         public void setWhitelisted(boolean whitelisted) {
             this.whitelisted = whitelisted;
         }
+        
+        public int getConnectionCount() {
+            return pingCount + loginCount;
+        }
     }
 }

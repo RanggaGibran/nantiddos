@@ -153,6 +153,18 @@ public class Nantiddos extends JavaPlugin implements Listener {
         return securityMetrics;
     }
     
+    public boolean getEnableProtection() {
+        return enableProtection;
+    }
+
+    public int getMaxConnectionsPerSecond() {
+        return maxConnectionsPerSecond;
+    }
+
+    public int getConnectionTimeout() {
+        return connectionTimeout;
+    }
+    
     private void loadConfiguration() {
         configFile = new File(dataFolder, "config.yml");
         

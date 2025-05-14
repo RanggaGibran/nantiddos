@@ -1234,6 +1234,29 @@ public class SecurityMetrics {
         return data;
     }
     
+    public int getThreatTrend() {
+        Map<String, Object> data = generateAnalyticsData();
+        
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> dailyData = (List<Map<String, Object>>) data.get("dailyData");
+        
+        if (dailyData != null && dailyData.size() >= 2) {
+            int todayMax = 0;
+            int yesterdayMax = 0;
+            
+            try {
+                todayMax = Integer.parseInt(dailyData.get(0).get("maxThreat").toString());
+                yesterdayMax = Integer.parseInt(dailyData.get(1).get("maxThreat").toString());
+                
+                return todayMax - yesterdayMax;
+            } catch (NumberFormatException e) {
+                logger.warning("Error calculating threat trend: " + e.getMessage());
+            }
+        }
+        
+        return 0;
+    }
+    
     private class DailyMetrics {
         private final String date;
         private final List<SecuritySnapshot> snapshots = new ArrayList<>();
