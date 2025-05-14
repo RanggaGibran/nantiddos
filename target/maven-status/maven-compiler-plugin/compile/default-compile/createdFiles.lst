@@ -3,7 +3,9 @@ id\nantiddos\dashboard\SecurityConsole.class
 id\nantiddos\protection\ConnectionTracker$ConnectionData.class
 id\nantiddos\protection\PacketMonitor$1.class
 id\nantiddos\protection\AttackDetector$AttackType.class
+id\nantiddos\VelocityNantiDDoS$ConnectionData.class
 id\nantiddos\network\ProxyIntegration.class
+id\nantiddos\VelocityNantiDDoS.class
 id\nantiddos\protection\PacketMonitor$3.class
 id\nantiddos\protection\ConnectionTracker$ConnectionType.class
 id\nantiddos\protection\AttackDetector$AttackData.class
