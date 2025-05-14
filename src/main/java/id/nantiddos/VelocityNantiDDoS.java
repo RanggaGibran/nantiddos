@@ -144,24 +144,20 @@ public class VelocityNantiDDoS {
         // Check if IP is blacklisted
         if (blacklistedIps.contains(ip)) {
             ServerPing.Builder builder = event.getPing().asBuilder();
-            builder.description(Component.text("Your IP is blacklisted from this server")
-                    .color(NamedTextColor.RED));
-            builder.onlinePlayers(0);
-            builder.maximumPlayers(0);
+            builder.version(new ServerPing.Version(-1, "Blacklisted"));
+            builder.description(blacklistedMessage);
             event.setPing(builder.build());
-            blockedConnections++;
             return;
         }
         
         // Check rate limiting
         if (shouldThrottleConnection(ip)) {
             ServerPing.Builder builder = event.getPing().asBuilder();
-            builder.description(Component.text("Connection throttled! Please wait before reconnecting")
-                    .color(NamedTextColor.RED));
-            builder.onlinePlayers(0);
-            builder.maximumPlayers(0);
+            builder.description(kickMessage);
             event.setPing(builder.build());
             blockedConnections++;
+            logger.info("Throttled ping from " + ip + " (rate limit exceeded)");
+            updateBotScore(ip, 1);
         }
     }
     
@@ -200,8 +196,7 @@ public class VelocityNantiDDoS {
         // Check blacklist
         if (blacklistedIps.contains(ip)) {
             event.setResult(PreLoginEvent.PreLoginComponentResult.denied(blacklistedMessage));
-            blockedConnections++;
-            logger.info("Blocked connection from blacklisted IP: " + ip);
+            logger.info("Blocked login from blacklisted IP: " + ip);
             return;
         }
         
@@ -238,11 +233,11 @@ public class VelocityNantiDDoS {
             data.setLastValidLogin(System.currentTimeMillis());
             data.setPlayerName(event.getPlayer().getUsername());
             
-            // Successful login reduces bot score
-            updateBotScore(ip, -2);
-            
-            // Cache player IP association
-            playerIpCache.put(event.getPlayer().getUniqueId(), ip);
+            // Reduce bot score for successful login
+            int currentScore = botScores.getOrDefault(ip, 0);
+            if (currentScore > 0) {
+                botScores.put(ip, Math.max(0, currentScore - 2));
+            }
         }
     }
     
@@ -264,32 +259,21 @@ public class VelocityNantiDDoS {
         playerData.setAdmin(isAdmin);
         playerData.setBypass(canBypass);
         
+        // Store player IP mapping for quick lookup
+        playerIpCache.put(player.getUniqueId(), ip);
+        
         // Show threat alerts to admins
         if (isAdmin && currentThreatLevel > 50) {
-            server.getScheduler()
-                .buildTask(this, () -> sendThreatAlert(player))
-                .delay(2, TimeUnit.SECONDS)
-                .schedule();
+            sendThreatAlert(player);
         }
         
         // For admins, show server ID information
         if (isAdmin) {
-            server.getScheduler().buildTask(this, () -> {
-                player.sendMessage(Component.text("=== NantiDDoS Network Info ===")
-                    .color(NamedTextColor.GOLD));
-                player.sendMessage(Component.text("Server ID: ")
-                    .color(NamedTextColor.YELLOW)
-                    .append(Component.text(config.getServerId())
-                    .color(NamedTextColor.WHITE)));
-                player.sendMessage(Component.text("Network ID: ")
-                    .color(NamedTextColor.YELLOW)
-                    .append(Component.text(config.getNetworkId())
-                    .color(NamedTextColor.WHITE)));
-                player.sendMessage(Component.text("Master Server: ")
-                    .color(NamedTextColor.YELLOW)
-                    .append(Component.text(config.isMasterServer() ? "YES" : "NO")
-                    .color(config.isMasterServer() ? NamedTextColor.GREEN : NamedTextColor.RED)));
-            }).delay(3, TimeUnit.SECONDS).schedule();
+            Component message = Component.text("[NantiDDoS] ")
+                .color(TextColor.color(0xFF5555))
+                .append(Component.text("Server ID: " + config.getServerId() + ", Network: " + config.getNetworkId())
+                .color(TextColor.color(0xFFFF55)));
+            player.sendMessage(message);
         }
     }
     
@@ -310,7 +294,17 @@ public class VelocityNantiDDoS {
         // Track server switches if needed
         PlayerData data = playerData.get(event.getPlayer().getUniqueId());
         if (data != null) {
-            data.addServerSwitch(event.getServer().getServerInfo().getName());
+            data.updateActivity();
+            String serverName = event.getServer().getServerInfo().getName();
+            data.addServerSwitch(serverName);
+            
+            // If this is an admin, check if they need a threat notification update
+            if (data.isAdmin() && currentThreatLevel > 50) {
+                // Only notify periodically to avoid spam
+                if (System.currentTimeMillis() - data.getLastActive() > 300000) { // 5 minutes
+                    sendThreatAlert(event.getPlayer());
+                }
+            }
         }
     }
 

@@ -4,6 +4,8 @@ d:\Plugin Nusa\nantiddos\src\main\java\id\nantiddos\Nantiddos.java
 d:\Plugin Nusa\nantiddos\src\main\java\id\nantiddos\analytics\SecurityMetrics.java
 d:\Plugin Nusa\nantiddos\src\main\java\id\nantiddos\VelocityNantiDDoS.java
 d:\Plugin Nusa\nantiddos\src\main\java\id\nantiddos\network\ProxyIntegration.java
+d:\Plugin Nusa\nantiddos\src\main\java\id\nantiddos\VelocityConfiguration.java
+d:\Plugin Nusa\nantiddos\src\main\java\id\nantiddos\network\VelocityNetworkManager.java
 d:\Plugin Nusa\nantiddos\src\main\java\id\nantiddos\dashboard\SecurityConsole.java
 d:\Plugin Nusa\nantiddos\src\main\java\id\nantiddos\protection\AttackDetector.java
 d:\Plugin Nusa\nantiddos\src\main\java\id\nantiddos\protection\ConnectionTracker.java

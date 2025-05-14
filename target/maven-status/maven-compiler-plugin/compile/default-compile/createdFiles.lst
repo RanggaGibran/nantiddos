@@ -6,7 +6,9 @@ id\nantiddos\protection\AttackDetector$AttackType.class
 id\nantiddos\VelocityNantiDDoS$1.class
 id\nantiddos\VelocityNantiDDoS$ConnectionData.class
 id\nantiddos\network\ProxyIntegration.class
+id\nantiddos\VelocityConfiguration.class
 id\nantiddos\VelocityNantiDDoS.class
+id\nantiddos\network\VelocityNetworkManager.class
 id\nantiddos\protection\PacketMonitor$3.class
 id\nantiddos\protection\ConnectionTracker$ConnectionType.class
 id\nantiddos\protection\AttackDetector$AttackData.class
@@ -15,6 +17,7 @@ id\nantiddos\notification\NotificationManager.class
 id\nantiddos\protection\AttackDetector$AttackSignature.class
 id\nantiddos\VelocityNantiDDoS$AttackRecord.class
 id\nantiddos\notification\NotificationManager$NotificationType.class
+id\nantiddos\network\VelocityNetworkManager$ServerInfo.class
 id\nantiddos\protection\AttackDetector$AlertLevel.class
 id\nantiddos\protection\IPManager.class
 id\nantiddos\protection\IPManager$CIDREntry.class
