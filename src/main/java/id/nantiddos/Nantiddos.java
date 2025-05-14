@@ -1,5 +1,6 @@
 package id.nantiddos;
 
+import id.nantiddos.analytics.SecurityMetrics;
 import id.nantiddos.dashboard.SecurityConsole;
 import id.nantiddos.notification.NotificationManager;
 import id.nantiddos.protection.AttackDetector;
@@ -8,7 +9,10 @@ import id.nantiddos.protection.ConnectionTracker.ConnectionType;
 import id.nantiddos.protection.IPManager;
 import id.nantiddos.protection.PacketMonitor;
 
+
 import java.io.File;
+import java.util.List;
+import java.util.Map;
 import java.util.logging.Logger;
 
 import org.bukkit.Bukkit;
@@ -40,6 +44,7 @@ public class Nantiddos extends JavaPlugin implements Listener {
     private SecurityConsole securityConsole;
     private AttackDetector attackDetector;
     private NotificationManager notificationManager;
+    private SecurityMetrics securityMetrics;
     
     private int maxConnectionsPerSecond;
     private int connectionTimeout;
@@ -75,6 +80,9 @@ public class Nantiddos extends JavaPlugin implements Listener {
             notificationManager = new NotificationManager(this);
             logger.info("External notification system initialized");
             
+            securityMetrics = new SecurityMetrics(this);
+            logger.info("Analytics and reporting system initialized");
+            
             securityConsole = new SecurityConsole(this, connectionTracker, ipManager, packetMonitor);
             logger.info("Security dashboard initialized");
         }, 40L);
@@ -103,6 +111,10 @@ public class Nantiddos extends JavaPlugin implements Listener {
         
         if (notificationManager != null) {
             notificationManager.shutdown();
+        }
+        
+        if (securityMetrics != null) {
+            securityMetrics.shutdown();
         }
         
         if (securityConsole != null) {
@@ -135,6 +147,10 @@ public class Nantiddos extends JavaPlugin implements Listener {
     
     public PacketMonitor getPacketMonitor() {
         return packetMonitor;
+    }
+    
+    public SecurityMetrics getSecurityMetrics() {
+        return securityMetrics;
     }
     
     private void loadConfiguration() {
@@ -207,6 +223,9 @@ public class Nantiddos extends JavaPlugin implements Listener {
                         sender.sendMessage("§cSecurity dashboard is not initialized yet. Please try again later.");
                     }
                     break;
+                case "analytics":
+                    handleAnalyticsCommand(sender, args);
+                    break;
                 default:
                     showHelp(sender);
                     break;
@@ -215,7 +234,62 @@ public class Nantiddos extends JavaPlugin implements Listener {
             return true;
         });
     }
+    private void handleAnalyticsCommand(CommandSender sender, String[] args) {
+    if (!sender.hasPermission("nantiddos.admin")) {
+        sender.sendMessage("§cYou don't have permission to use this command.");
+        return;
+    }
     
+    if (securityMetrics == null) {
+        sender.sendMessage("§cAnalytics system is not initialized yet. Please try again later.");
+        return;
+    }
+    
+    if (args.length < 2) {
+        sender.sendMessage("§6========== §eNantiDDoS Analytics §6==========");
+        sender.sendMessage("§e/nantiddos analytics report daily §7- View today's security summary");
+        sender.sendMessage("§e/nantiddos analytics report weekly §7- View this week's security summary");
+        sender.sendMessage("§e/nantiddos analytics report custom <start> <end> §7- Generate a custom report");
+        sender.sendMessage("§e/nantiddos analytics list §7- List available reports");
+        return;
+    }
+    
+    switch (args[1].toLowerCase()) {
+        case "report":
+            if (args.length < 3) {
+                sender.sendMessage("§cPlease specify the report type (daily, weekly, custom).");
+                return;
+            }
+            
+            switch (args[2].toLowerCase()) {
+                case "daily":
+                    showDailyAnalytics(sender);
+                    break;
+                case "weekly":
+                    showWeeklyAnalytics(sender);
+                    break;
+                case "custom":
+                    if (args.length < 5) {
+                        sender.sendMessage("§cUsage: /nantiddos analytics report custom <start-date> <end-date>");
+                        sender.sendMessage("§cDates should be in yyyy-MM-dd format.");
+                        return;
+                    }
+                    String result = securityMetrics.generateCustomReport(args[3], args[4]);
+                    sender.sendMessage("§e" + result);
+                    break;
+                default:
+                    sender.sendMessage("§cUnknown report type. Options: daily, weekly, custom");
+                    break;
+            }
+            break;
+        case "list":
+            listReports(sender);
+            break;
+        default:
+            sender.sendMessage("§cUnknown analytics subcommand. Try /nantiddos analytics");
+            break;
+    }
+}
     private void handlePacketsCommand(CommandSender sender, String[] args) {
         if (packetMonitor == null) {
             sender.sendMessage("§cPacket monitoring system is not initialized yet.");
@@ -257,6 +331,77 @@ public class Nantiddos extends JavaPlugin implements Listener {
                 break;
         }
     }
+
+    private void showDailyAnalytics(CommandSender sender) {
+    Map<String, Object> data = securityMetrics.generateAnalyticsData();
+    
+    sender.sendMessage("§6========== §eNantiDDoS Daily Analytics §6==========");
+    sender.sendMessage("§eCurrent Threat Level: §c" + data.get("currentThreatLevel") + " (" + data.get("currentAlertLevel") + ")");
+    sender.sendMessage("§eActive Attack Sources: §c" + data.get("activeAttackSources"));
+    
+    @SuppressWarnings("unchecked")
+    List<Map<String, Object>> dailyData = (List<Map<String, Object>>) data.get("dailyData");
+    if (dailyData != null && !dailyData.isEmpty()) {
+        Map<String, Object> today = dailyData.get(0);
+        sender.sendMessage("§eToday's Statistics:");
+        sender.sendMessage("§7- Average Connections: §f" + today.get("avgConnections"));
+        sender.sendMessage("§7- Maximum Connections: §f" + today.get("maxConnections"));
+        sender.sendMessage("§7- Maximum Threat Level: §f" + today.get("maxThreat"));
+        sender.sendMessage("§7- Attack Count: §f" + today.get("attackCount"));
+    }
+    
+    sender.sendMessage("§eDetailed reports available in plugins/NantiDDoS/reports/");
+}
+
+private void showWeeklyAnalytics(CommandSender sender) {
+    Map<String, Object> data = securityMetrics.generateAnalyticsData();
+    
+    sender.sendMessage("§6========== §eNantiDDoS Weekly Analytics §6==========");
+    sender.sendMessage("§eTotal Connections: §f" + data.get("totalConnections"));
+    sender.sendMessage("§eMax Connections: §f" + data.get("maxConnections"));
+    sender.sendMessage("§eTotal Attacks: §c" + data.get("totalAttacks"));
+    sender.sendMessage("§eHigh Severity Attacks: §c" + data.get("highSeverityAttacks"));
+    
+    @SuppressWarnings("unchecked")
+    List<Map<String, Object>> attackTypes = (List<Map<String, Object>>) data.get("attackTypes");
+    if (attackTypes != null && !attackTypes.isEmpty()) {
+        sender.sendMessage("§eAttack Types:");
+        for (Map<String, Object> type : attackTypes) {
+            sender.sendMessage("§7- " + type.get("type") + ": §c" + type.get("count"));
+        }
+    }
+    
+    sender.sendMessage("§eDetailed reports available in plugins/NantiDDoS/reports/");
+}
+
+private void listReports(CommandSender sender) {
+    List<Map<String, String>> reports = securityMetrics.getReportHistory();
+    
+    sender.sendMessage("§6========== §eNantiDDoS Report History §6==========");
+    if (reports.isEmpty()) {
+        sender.sendMessage("§7No reports available.");
+        return;
+    }
+    
+    int count = 0;
+    for (Map<String, String> report : reports) {
+        if (count++ >= 10) {
+            sender.sendMessage("§7... and " + (reports.size() - 10) + " more reports.");
+            break;
+        }
+        
+        String fileName = report.getOrDefault("fileName", report.getOrDefault("path", "Unknown"));
+        if (fileName.contains("\\")) {
+            fileName = fileName.substring(fileName.lastIndexOf('\\') + 1);
+        }
+        String date = report.getOrDefault("date", report.getOrDefault("timestamp", "Unknown"));
+        String size = report.getOrDefault("size", "Unknown");
+        
+        sender.sendMessage("§e" + fileName + " §7- §f" + date + " §7(§f" + size + "§7)");
+    }
+    
+    sender.sendMessage("§7Reports are stored in plugins/NantiDDoS/reports/");
+}
     
     private void handleWhitelistCommand(CommandSender sender, String[] args) {
         if (args.length < 2) {
@@ -381,6 +526,7 @@ public class Nantiddos extends JavaPlugin implements Listener {
         sender.sendMessage("§e/nantiddos blacklist <add|remove|list> [ip] §7- Manage blacklist");
         sender.sendMessage("§e/nantiddos packets <info|kick> [player] §7- Packet analysis commands");
         sender.sendMessage("§e/nantiddos dashboard §7- Open security dashboard GUI");
+        sender.sendMessage("§e/nantiddos analytics §7- View security analytics");
     }
     
     private void reloadConfiguration(CommandSender sender) {
@@ -405,6 +551,10 @@ public class Nantiddos extends JavaPlugin implements Listener {
         
         if (notificationManager != null) {
             notificationManager.loadConfig();
+        }
+        
+        if (securityMetrics != null) {
+            securityMetrics.loadConfig();
         }
         
         sender.sendMessage("§aNantiDDoS configuration reloaded successfully!");
@@ -442,10 +592,18 @@ public class Nantiddos extends JavaPlugin implements Listener {
         
         if (attackDetector != null) {
             sender.sendMessage("§eThreat Level: " + attackDetector.getSystemAlertLevel().getColor() + 
-                               attackDetector.getSystemAlertLevel().name() + " (" + attackDetector.getCurrentThreatLevel() + "/100)");
+                              attackDetector.getSystemAlertLevel().name() + " (" + attackDetector.getCurrentThreatLevel() + "/100)");
             sender.sendMessage("§eActive Attack Sources: §c" + attackDetector.getActiveAttackSourcesCount());
         } else {
             sender.sendMessage("§eAttack Detection: §cNot Initialized");
+        }
+        
+        if (securityMetrics != null) {
+            Map<String, Object> data = securityMetrics.generateAnalyticsData();
+            sender.sendMessage("§eAttacks (Last 7 Days): §c" + data.get("totalAttacks"));
+            sender.sendMessage("§eHigh Severity Attacks: §c" + data.get("highSeverityAttacks"));
+        } else {
+            sender.sendMessage("§eAnalytics: §cNot Initialized");
         }
     }
     
