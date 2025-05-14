@@ -2,7 +2,7 @@
   "id": "nantiddos",
   "name": "NantiDDoS",
   "version": "1.0.0",
-  "description": "DDoS protection system for Velocity",
+  "description": "Advanced DDoS protection system for Velocity",
   "authors": ["NusaPlugin"],
   "dependencies": [],
   "main": "id.nantiddos.VelocityNantiDDoS"
