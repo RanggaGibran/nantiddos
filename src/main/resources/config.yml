@@ -48,6 +48,16 @@ protection:
         threshold: 150
         decay-rate: 1
 
+analytics:
+  enabled: true
+  enable-database: false
+  enable-csv-export: true
+  enable-json-export: false
+  enable-auto-reporting: true
+  data-collection-interval-minutes: 15
+  data-retention-days: 30
+  export-format: csv
+
 notifications:
   enabled: false
   min-level: HIGH
