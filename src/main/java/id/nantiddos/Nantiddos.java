@@ -189,7 +189,6 @@ public class Nantiddos extends JavaPlugin implements Listener {
             connectionTracker.trackConnection(event.getAddress(), ConnectionType.SERVER_PING);
             
             if (connectionTracker.shouldThrottleConnection(event.getAddress())) {
-                // Throttle by setting max players to 0 and/or a custom MOTD
                 event.setMaxPlayers(0);
                 event.setMotd("§c§lConnection throttled! Please wait before reconnecting.");
             }
