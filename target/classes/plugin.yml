@@ -5,7 +5,7 @@ api-version: 1.15
 commands:
   nantiddos:
     description: Main command for NantiDDoS plugin
-    usage: /nantiddos [reload|status|enable|disable|clear]
+    usage: /nantiddos [reload|status|enable|disable|clear|whitelist|blacklist|packets|dashboard]
     permission: nantiddos.admin
 permissions:
   nantiddos.admin:

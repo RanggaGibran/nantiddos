@@ -12,6 +12,41 @@ protection:
     auto-save: true
     auto-save-interval-minutes: 10
     block-by-default: false
+  packet-analysis:
+    packet-limit-threshold: 300
+    analysis-interval-seconds: 10
+    suspicious-packet-threshold: 500
+    autoban-threshold: 1000
+    autoban-enabled: false
+    intelligent-filtering: true
+  attack-detection:
+    analysis-interval-seconds: 30
+    data-retention-minutes: 60
+    autoban-threshold: 75
+    autoblacklist-threshold: 85
+    attack-history-size: 50
+    autoban-enabled: false
+    autoblacklist-enabled: false
+    adaptive-thresholds: true
+    signatures:
+      CONNECTION_FLOOD:
+        threshold: 50
+        decay-rate: 2
+      LOGIN_FLOOD:
+        threshold: 75
+        decay-rate: 1
+      PING_FLOOD:
+        threshold: 40
+        decay-rate: 3
+      PACKET_FLOOD:
+        threshold: 100
+        decay-rate: 1
+      BOT_NETWORK:
+        threshold: 125
+        decay-rate: 1
+      DISTRIBUTED_ATTACK:
+        threshold: 150
+        decay-rate: 1
 
 notifications:
   notify-admins: true
@@ -23,3 +58,4 @@ messages:
   kick-message: "§c§lConnection throttled! Please wait before reconnecting."
   admin-notification: "§c[NantiDDoS] §eBlocked connection attempt from §c{ip} §e(rate limit exceeded)"
   blacklisted-ip-message: "§c§lYour IP address is blacklisted from this server."
+  packet-flood-message: "§c§lYou have been kicked for sending too many packets to the server."

@@ -1,8 +1,11 @@
 package id.nantiddos;
 
+import id.nantiddos.dashboard.SecurityConsole;
+import id.nantiddos.protection.AttackDetector;
 import id.nantiddos.protection.ConnectionTracker;
 import id.nantiddos.protection.ConnectionTracker.ConnectionType;
 import id.nantiddos.protection.IPManager;
+import id.nantiddos.protection.PacketMonitor;
 
 import java.io.File;
 import java.util.logging.Logger;
@@ -32,6 +35,9 @@ public class Nantiddos extends JavaPlugin implements Listener {
     
     private ConnectionTracker connectionTracker;
     private IPManager ipManager;
+    private PacketMonitor packetMonitor;
+    private SecurityConsole securityConsole;
+    private AttackDetector attackDetector;
     
     private int maxConnectionsPerSecond;
     private int connectionTimeout;
@@ -39,6 +45,7 @@ public class Nantiddos extends JavaPlugin implements Listener {
     private boolean notifyAdmins;
     private String kickMessage;
     private String blacklistedMessage;
+    private String packetFloodMessage;
     
     @Override
     public void onEnable() {
@@ -56,6 +63,17 @@ public class Nantiddos extends JavaPlugin implements Listener {
         connectionTracker = new ConnectionTracker(this);
         ipManager = new IPManager(this);
         
+        Bukkit.getScheduler().runTaskLater(this, () -> {
+            packetMonitor = new PacketMonitor(this, connectionTracker, ipManager);
+            logger.info("Packet analysis system initialized");
+            
+            attackDetector = new AttackDetector(this, connectionTracker, ipManager, packetMonitor);
+            logger.info("Attack pattern recognition system initialized");
+            
+            securityConsole = new SecurityConsole(this, connectionTracker, ipManager, packetMonitor);
+            logger.info("Security dashboard initialized");
+        }, 40L);
+        
         logger.info("NantiDDoS v" + getDescription().getVersion() + " enabled successfully");
         logger.info("Protection status: " + (enableProtection ? "ENABLED" : "DISABLED"));
     }
@@ -68,6 +86,18 @@ public class Nantiddos extends JavaPlugin implements Listener {
         
         if (ipManager != null) {
             ipManager.shutdown();
+        }
+        
+        if (packetMonitor != null) {
+            packetMonitor.shutdown();
+        }
+        
+        if (attackDetector != null) {
+            attackDetector.shutdown();
+        }
+        
+        if (securityConsole != null) {
+            securityConsole.shutdown();
         }
         
         logger.info("NantiDDoS disabled");
@@ -93,6 +123,7 @@ public class Nantiddos extends JavaPlugin implements Listener {
         notifyAdmins = config.getBoolean("notifications.notify-admins", true);
         kickMessage = config.getString("messages.kick-message", "§c§lConnection throttled! Please wait before reconnecting.");
         blacklistedMessage = config.getString("messages.blacklisted-ip-message", "§c§lYour IP address is blacklisted from this server.");
+        packetFloodMessage = config.getString("messages.packet-flood-message", "§c§lYou have been kicked for sending too many packets to the server.");
         
         saveConfig();
     }
@@ -131,6 +162,22 @@ public class Nantiddos extends JavaPlugin implements Listener {
                 case "blacklist":
                     handleBlacklistCommand(sender, args);
                     break;
+                case "packets":
+                    handlePacketsCommand(sender, args);
+                    break;
+                case "dashboard":
+                case "gui":
+                    if (!(sender instanceof Player)) {
+                        sender.sendMessage("§cThis command can only be used by players.");
+                        return true;
+                    }
+                    
+                    if (securityConsole != null) {
+                        securityConsole.openDashboard((Player) sender);
+                    } else {
+                        sender.sendMessage("§cSecurity dashboard is not initialized yet. Please try again later.");
+                    }
+                    break;
                 default:
                     showHelp(sender);
                     break;
@@ -138,6 +185,48 @@ public class Nantiddos extends JavaPlugin implements Listener {
             
             return true;
         });
+    }
+    
+    private void handlePacketsCommand(CommandSender sender, String[] args) {
+        if (packetMonitor == null) {
+            sender.sendMessage("§cPacket monitoring system is not initialized yet.");
+            return;
+        }
+        
+        if (args.length < 2) {
+            sender.sendMessage("§c§lUsage: §e/nantiddos packets <info|kick> [player]");
+            return;
+        }
+        
+        switch (args[1].toLowerCase()) {
+            case "info":
+                sender.sendMessage("§6========== §ePacket Analysis Info §6==========");
+                sender.sendMessage("§eMonitoring enabled: §a" + (packetMonitor.isPacketMonitoringFullyAvailable() ? "Yes" : "Limited (No ProtocolLib)"));
+                sender.sendMessage("§eActive monitoring sessions: §a" + packetMonitor.getActivePacketMonitoringSessions());
+                sender.sendMessage("§eSuspicious packet sources: §c" + packetMonitor.getSuspiciousPacketSources());
+                break;
+                
+            case "kick":
+                if (args.length < 3) {
+                    sender.sendMessage("§c§lUsage: §e/nantiddos packets kick <player>");
+                    return;
+                }
+                
+                Player target = Bukkit.getPlayer(args[2]);
+                if (target == null) {
+                    sender.sendMessage("§cPlayer not found: §e" + args[2]);
+                    return;
+                }
+                
+                target.kickPlayer(packetFloodMessage);
+                sender.sendMessage("§aKicked player §e" + target.getName() + " §afor packet flooding");
+                break;
+                
+            default:
+                sender.sendMessage("§c§lUnknown subcommand: §e" + args[1]);
+                sender.sendMessage("§c§lUsage: §e/nantiddos packets <info|kick> [player]");
+                break;
+        }
     }
     
     private void handleWhitelistCommand(CommandSender sender, String[] args) {
@@ -261,6 +350,8 @@ public class Nantiddos extends JavaPlugin implements Listener {
         sender.sendMessage("§e/nantiddos clear §7- Clear connection data");
         sender.sendMessage("§e/nantiddos whitelist <add|remove|list> [ip] §7- Manage whitelist");
         sender.sendMessage("§e/nantiddos blacklist <add|remove|list> [ip] §7- Manage blacklist");
+        sender.sendMessage("§e/nantiddos packets <info|kick> [player] §7- Packet analysis commands");
+        sender.sendMessage("§e/nantiddos dashboard §7- Open security dashboard GUI");
     }
     
     private void reloadConfiguration(CommandSender sender) {
@@ -273,6 +364,14 @@ public class Nantiddos extends JavaPlugin implements Listener {
         
         if (ipManager != null) {
             ipManager.loadConfig();
+        }
+        
+        if (packetMonitor != null) {
+            packetMonitor.loadConfig();
+        }
+        
+        if (attackDetector != null) {
+            attackDetector.loadConfig();
         }
         
         sender.sendMessage("§aNantiDDoS configuration reloaded successfully!");
@@ -295,6 +394,21 @@ public class Nantiddos extends JavaPlugin implements Listener {
             sender.sendMessage("§eBlacklisted IPs: §c" + ipManager.getBlacklistedIps().size());
             sender.sendMessage("§eBlacklisted Networks: §c" + ipManager.getBlacklistedNetworks().size());
         }
+        
+        if (packetMonitor != null) {
+            sender.sendMessage("§ePacket Analysis: " + (packetMonitor.isPacketMonitoringFullyAvailable() ? "§aFull" : "§eBasic"));
+            sender.sendMessage("§eSuspicious Packet Sources: §c" + packetMonitor.getSuspiciousPacketSources());
+        } else {
+            sender.sendMessage("§ePacket Analysis: §cNot Initialized");
+        }
+        
+        if (attackDetector != null) {
+            sender.sendMessage("§eThreat Level: " + attackDetector.getSystemAlertLevel().getColor() + 
+                               attackDetector.getSystemAlertLevel().name() + " (" + attackDetector.getCurrentThreatLevel() + "/100)");
+            sender.sendMessage("§eActive Attack Sources: §c" + attackDetector.getActiveAttackSourcesCount());
+        } else {
+            sender.sendMessage("§eAttack Detection: §cNot Initialized");
+        }
     }
     
     private void toggleProtection(CommandSender sender, boolean enable) {
@@ -304,6 +418,14 @@ public class Nantiddos extends JavaPlugin implements Listener {
         
         if (connectionTracker != null) {
             connectionTracker.enableProtection(enable);
+        }
+        
+        if (packetMonitor != null) {
+            packetMonitor.enableProtection(enable);
+        }
+        
+        if (attackDetector != null) {
+            attackDetector.enableProtection(enable);
         }
         
         sender.sendMessage("§aNantiDDoS protection " + (enable ? "enabled" : "disabled") + "!");

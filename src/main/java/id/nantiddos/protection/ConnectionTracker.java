@@ -74,6 +74,10 @@ public class ConnectionTracker {
             case COMMAND:
                 data.incrementCommands();
                 break;
+            case SUSPICIOUS_PACKETS:
+                data.incrementPings();
+                botScores.put(ip, botScores.getOrDefault(ip, 0) + 5);
+                break;
         }
         
         analyzeConnectionPattern(ip, data);
@@ -218,7 +222,8 @@ public class ConnectionTracker {
         SERVER_PING,
         LOGIN_ATTEMPT,
         CHAT_MESSAGE,
-        COMMAND
+        COMMAND,
+        SUSPICIOUS_PACKETS
     }
     
     public static class ConnectionData {
