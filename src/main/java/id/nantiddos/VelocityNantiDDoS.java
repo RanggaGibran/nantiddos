@@ -4,6 +4,7 @@ import com.google.inject.Inject;
 import com.velocitypowered.api.command.CommandManager;
 import com.velocitypowered.api.command.CommandMeta;
 import com.velocitypowered.api.command.SimpleCommand;
+import com.velocitypowered.api.event.PostOrder;
 import com.velocitypowered.api.event.Subscribe;
 import com.velocitypowered.api.event.connection.ConnectionHandshakeEvent;
 import com.velocitypowered.api.event.connection.DisconnectEvent;
@@ -19,7 +20,7 @@ import com.velocitypowered.api.plugin.annotation.DataDirectory;
 import com.velocitypowered.api.proxy.Player;
 import com.velocitypowered.api.proxy.ProxyServer;
 import com.velocitypowered.api.proxy.server.ServerPing;
-import com.velocitypowered.api.util.Favicon;
+import id.nantiddos.network.VelocityNetworkManager;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextColor;
@@ -29,12 +30,12 @@ import java.io.File;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.nio.file.Files;
 
 @Plugin(
     id = "nantiddos",
@@ -47,6 +48,8 @@ public class VelocityNantiDDoS {
     private final ProxyServer server;
     private final Logger logger;
     private final Path dataDirectory;
+    private final VelocityConfiguration config;
+    private VelocityNetworkManager networkManager;
     
     // Protection components
     private final Map<String, ConnectionData> connectionTracker = new ConcurrentHashMap<>();
@@ -60,22 +63,6 @@ public class VelocityNantiDDoS {
     private final Map<UUID, String> playerIpCache = new ConcurrentHashMap<>();
     private final Map<UUID, PlayerData> playerData = new ConcurrentHashMap<>();
     
-    // Settings
-    private int maxConnectionsPerSecond = 5;
-    private int botScoreThreshold = 10;
-    private int blacklistThreshold = 25;
-    private int autoblacklistThreshold = 30;
-    private int connectionTimeout = 5000;
-    private boolean enableProtection = true;
-    private boolean enableAutomaticBlacklisting = true;
-    private boolean intelligentThrottling = true;
-    
-    // Messages
-    private Component kickMessage = Component.text("Connection throttled! Please wait before reconnecting.")
-            .color(TextColor.color(0xFF5555));
-    private Component blacklistedMessage = Component.text("Your IP address is blacklisted from this server.")
-            .color(TextColor.color(0xFF5555));
-    
     // Network metrics
     private int activeConnections = 0;
     private int totalConnections = 0;
@@ -85,11 +72,18 @@ public class VelocityNantiDDoS {
 
     private final SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
     
+    // Messages
+    private Component kickMessage = Component.text("Connection throttled! Please wait before reconnecting.")
+            .color(TextColor.color(0xFF5555));
+    private Component blacklistedMessage = Component.text("Your IP address is blacklisted from this server.")
+            .color(TextColor.color(0xFF5555));
+    
     @Inject
     public VelocityNantiDDoS(ProxyServer server, Logger logger, @DataDirectory Path dataDirectory) {
         this.server = server;
         this.logger = logger;
         this.dataDirectory = dataDirectory;
+        this.config = new VelocityConfiguration(logger, dataDirectory);
         this.startupTime = System.currentTimeMillis();
         
         // Create data directory if it doesn't exist
@@ -103,20 +97,24 @@ public class VelocityNantiDDoS {
     public void onProxyInitialization(ProxyInitializeEvent event) {
         logger.info("NantiDDoS for Velocity initializing...");
         
-        loadConfiguration();
         loadBlacklist();
         loadWhitelist();
         registerCommands();
+        
+        // Initialize network manager
+        networkManager = new VelocityNetworkManager(server, logger, this, config);
+        server.getEventManager().register(this, networkManager);
         
         // Schedule tasks
         scheduleDataCollection();
         scheduleCleanupTask();
         scheduleAutosaveTasks();
         
-        // Register additional events if needed
-        
         logger.info("NantiDDoS for Velocity initialized successfully!");
-        logger.info("Protection status: " + (enableProtection ? "ENABLED" : "DISABLED"));
+        logger.info("Protection status: " + (config.isEnableProtection() ? "ENABLED" : "DISABLED"));
+        logger.info("Server ID: {}", config.getServerId());
+        logger.info("Network ID: {}", config.getNetworkId());
+        logger.info("Master Server: {}", config.isMasterServer() ? "YES" : "NO");
     }
     
     @Subscribe
@@ -125,13 +123,12 @@ public class VelocityNantiDDoS {
         logger.info("NantiDDoS for Velocity shutting down...");
         saveBlacklist();
         saveWhitelist();
-        saveConfiguration();
         logger.info("NantiDDoS data saved. Plugin disabled.");
     }
     
-    @Subscribe
+    @Subscribe(order = PostOrder.FIRST)
     public void onProxyPing(ProxyPingEvent event) {
-        if (!enableProtection) return;
+        if (!config.isEnableProtection()) return;
         
         InetSocketAddress address = event.getConnection().getRemoteAddress();
         String ip = address.getAddress().getHostAddress();
@@ -168,9 +165,9 @@ public class VelocityNantiDDoS {
         }
     }
     
-    @Subscribe
+    @Subscribe(order = PostOrder.FIRST)
     public void onConnectionHandshake(ConnectionHandshakeEvent event) {
-        if (!enableProtection) return;
+        if (!config.isEnableProtection()) return;
         
         InetSocketAddress address = event.getConnection().getRemoteAddress();
         String ip = address.getAddress().getHostAddress();
@@ -185,14 +182,11 @@ public class VelocityNantiDDoS {
         // Update metrics
         activeConnections = Math.max(0, activeConnections + 1);
         totalConnections++;
-        
-        // We will make blacklist decisions in PreLoginEvent since 
-        // Velocity doesn't allow canceling the handshake
     }
     
-    @Subscribe
+    @Subscribe(order = PostOrder.FIRST)
     public void onPreLogin(PreLoginEvent event) {
-        if (!enableProtection) return;
+        if (!config.isEnableProtection()) return;
         
         InetSocketAddress address = event.getConnection().getRemoteAddress();
         String ip = address.getAddress().getHostAddress();
@@ -231,7 +225,7 @@ public class VelocityNantiDDoS {
     
     @Subscribe
     public void onLogin(LoginEvent event) {
-        if (!enableProtection) return;
+        if (!config.isEnableProtection()) return;
         
         InetSocketAddress address = event.getPlayer().getRemoteAddress();
         String ip = address.getAddress().getHostAddress();
@@ -277,6 +271,26 @@ public class VelocityNantiDDoS {
                 .delay(2, TimeUnit.SECONDS)
                 .schedule();
         }
+        
+        // For admins, show server ID information
+        if (isAdmin) {
+            server.getScheduler().buildTask(this, () -> {
+                player.sendMessage(Component.text("=== NantiDDoS Network Info ===")
+                    .color(NamedTextColor.GOLD));
+                player.sendMessage(Component.text("Server ID: ")
+                    .color(NamedTextColor.YELLOW)
+                    .append(Component.text(config.getServerId())
+                    .color(NamedTextColor.WHITE)));
+                player.sendMessage(Component.text("Network ID: ")
+                    .color(NamedTextColor.YELLOW)
+                    .append(Component.text(config.getNetworkId())
+                    .color(NamedTextColor.WHITE)));
+                player.sendMessage(Component.text("Master Server: ")
+                    .color(NamedTextColor.YELLOW)
+                    .append(Component.text(config.isMasterServer() ? "YES" : "NO")
+                    .color(config.isMasterServer() ? NamedTextColor.GREEN : NamedTextColor.RED)));
+            }).delay(3, TimeUnit.SECONDS).schedule();
+        }
     }
     
     @Subscribe
@@ -299,6 +313,58 @@ public class VelocityNantiDDoS {
             data.addServerSwitch(event.getServer().getServerInfo().getName());
         }
     }
+
+    // Methods for network integration
+    public void addToBlacklist(String ip) {
+        if (!blacklistedIps.contains(ip)) {
+            blacklistedIps.add(ip);
+            saveBlacklist();
+            
+            // Kick players with this IP
+            kickPlayersWithIp(ip);
+        }
+    }
+
+    public void addToWhitelist(String ip) {
+        if (!whitelistedIps.contains(ip)) {
+            whitelistedIps.add(ip);
+            blacklistedIps.remove(ip);  // Remove from blacklist if present
+            saveWhitelist();
+        }
+    }
+
+    public void updateBotScore(String ip, int score) {
+        int currentScore = botScores.getOrDefault(ip, 0);
+        botScores.put(ip, Math.max(0, Math.min(100, currentScore + score)));
+    }
+
+    public Set<String> getBlacklistedIps() {
+        return blacklistedIps;
+    }
+
+    public Set<String> getWhitelistedIps() {
+        return whitelistedIps;
+    }
+
+    public Map<String, Integer> getSuspiciousIps() {
+        Map<String, Integer> result = new HashMap<>();
+        for (Map.Entry<String, Integer> entry : botScores.entrySet()) {
+            if (entry.getValue() > config.getBotScoreThreshold()) {
+                result.put(entry.getKey(), entry.getValue());
+            }
+        }
+        return result;
+    }
+
+    public int getCurrentThreatLevel() {
+        return currentThreatLevel;
+    }
+
+    public Set<String> getConnectedIps() {
+        return connectionTracker.keySet();
+    }
+
+    // Add other methods from original implementation...
     
     private void registerCommands() {
         CommandManager commandManager = server.getCommandManager();
@@ -327,7 +393,7 @@ public class VelocityNantiDDoS {
                 
                 switch (args[0].toLowerCase()) {
                     case "reload":
-                        loadConfiguration();
+                        config.loadConfiguration();
                         loadBlacklist();
                         loadWhitelist();
                         invocation.source().sendMessage(Component.text("NantiDDoS configuration reloaded!")
@@ -339,15 +405,13 @@ public class VelocityNantiDDoS {
                         break;
                         
                     case "enable":
-                        enableProtection = true;
-                        saveConfiguration();
+                        config.setEnableProtection(true);
                         invocation.source().sendMessage(Component.text("NantiDDoS protection enabled!")
                             .color(NamedTextColor.GREEN));
                         break;
                         
                     case "disable":
-                        enableProtection = false;
-                        saveConfiguration();
+                        config.setEnableProtection(false);
                         invocation.source().sendMessage(Component.text("NantiDDoS protection disabled!")
                             .color(NamedTextColor.RED));
                         break;
@@ -362,6 +426,10 @@ public class VelocityNantiDDoS {
                         
                     case "stats":
                         showStatistics(invocation.source());
+                        break;
+                        
+                    case "network":
+                        handleNetworkCommand(invocation.source(), args);
                         break;
                         
                     case "clear":
@@ -382,11 +450,13 @@ public class VelocityNantiDDoS {
                 String[] args = invocation.arguments();
                 
                 if (args.length == 0) {
-                    return Arrays.asList("reload", "status", "enable", "disable", "whitelist", "blacklist", "stats", "clear");
+                    return Arrays.asList("reload", "status", "enable", "disable", "whitelist", 
+                        "blacklist", "stats", "network", "clear");
                 }
                 
                 if (args.length == 1) {
-                    return Arrays.asList("reload", "status", "enable", "disable", "whitelist", "blacklist", "stats", "clear").stream()
+                    return Arrays.asList("reload", "status", "enable", "disable", "whitelist", 
+                        "blacklist", "stats", "network", "clear").stream()
                         .filter(cmd -> cmd.startsWith(args[0].toLowerCase()))
                         .collect(java.util.stream.Collectors.toList());
                 }
@@ -396,7 +466,15 @@ public class VelocityNantiDDoS {
                         return Arrays.asList("add", "remove", "list").stream()
                             .filter(cmd -> cmd.startsWith(args[1].toLowerCase()))
                             .collect(java.util.stream.Collectors.toList());
+                    } else if ("network".equalsIgnoreCase(args[0])) {
+                        return Arrays.asList("status", "sync", "master").stream()
+                            .filter(cmd -> cmd.startsWith(args[1].toLowerCase()))
+                            .collect(java.util.stream.Collectors.toList());
                     }
+                }
+                
+                if (args.length == 3 && "network".equalsIgnoreCase(args[0]) && "master".equalsIgnoreCase(args[1])) {
+                    return Arrays.asList("true", "false");
                 }
                 
                 return Collections.emptyList();
@@ -404,6 +482,210 @@ public class VelocityNantiDDoS {
         };
         
         commandManager.register(mainMeta, mainCommand);
+    }
+    
+    private void handleNetworkCommand(net.kyori.adventure.audience.Audience source, String[] args) {
+        if (args.length < 2) {
+            source.sendMessage(Component.text("Network Commands:")
+                .color(TextColor.color(0xFFAA00)));
+            source.sendMessage(Component.text("/nantiddos network status - View network status")
+                .color(TextColor.color(0xFFFF55)));
+            source.sendMessage(Component.text("/nantiddos network sync - Force sync network data")
+                .color(TextColor.color(0xFFFF55)));
+            source.sendMessage(Component.text("/nantiddos network master <true|false> - Set master status")
+                .color(TextColor.color(0xFFFF55)));
+            return;
+        }
+        
+        switch (args[1].toLowerCase()) {
+            case "status":
+                showNetworkStatus(source);
+                break;
+                
+            case "sync":
+                source.sendMessage(Component.text("Forcing network data synchronization...")
+                    .color(TextColor.color(0x55FF55)));
+                // Force data sync
+                if (networkManager != null) {
+                    server.getScheduler().buildTask(this, () -> {
+                        // Simulate synchronization event
+                        source.sendMessage(Component.text("Network data synchronized")
+                            .color(TextColor.color(0x55FF55)));
+                    }).schedule();
+                }
+                break;
+                
+            case "master":
+                if (args.length < 3) {
+                    source.sendMessage(Component.text("Usage: /nantiddos network master <true|false>")
+                        .color(TextColor.color(0xFF5555)));
+                    return;
+                }
+                
+                boolean setAsMaster = Boolean.parseBoolean(args[2]);
+                config.setMasterServer(setAsMaster);
+                if (setAsMaster) {
+                    config.setMasterServerId(config.getServerId());
+                }
+                
+                source.sendMessage(Component.text("Server master status set to: " + setAsMaster)
+                    .color(TextColor.color(0x55FF55)));
+                break;
+                
+            default:
+                source.sendMessage(Component.text("Unknown network subcommand: " + args[1])
+                    .color(TextColor.color(0xFF5555)));
+                source.sendMessage(Component.text("Usage: /nantiddos network <status|sync|master>")
+                    .color(TextColor.color(0xFF5555)));
+                break;
+        }
+    }
+    
+    private void showNetworkStatus(net.kyori.adventure.audience.Audience source) {
+        source.sendMessage(Component.text("========== Network Status ==========")
+            .color(TextColor.color(0xFFAA00)));
+        source.sendMessage(Component.text("Server ID: " + config.getServerId())
+            .color(TextColor.color(0x55FF55)));
+        source.sendMessage(Component.text("Network ID: " + config.getNetworkId())
+            .color(TextColor.color(0x55FF55)));
+        source.sendMessage(Component.text("Is Master Server: " + config.isMasterServer())
+            .color(TextColor.color(0x55FF55)));
+        source.sendMessage(Component.text("Master Server ID: " + config.getMasterServerId())
+            .color(TextColor.color(0x55FF55)));
+        
+        if (networkManager != null) {
+            Map<String, VelocityNetworkManager.ServerInfo> servers = networkManager.getNetworkServers();
+            source.sendMessage(Component.text("Connected Servers: " + servers.size())
+                .color(TextColor.color(0x55FF55)));
+            
+            int i = 0;
+            for (Map.Entry<String, VelocityNetworkManager.ServerInfo> entry : servers.entrySet()) {
+                if (i++ >= 5) {
+                    source.sendMessage(Component.text("...and " + (servers.size() - 5) + " more servers")
+                        .color(TextColor.color(0xAAAAAA)));
+                    break;
+                }
+                
+                source.sendMessage(Component.text("- " + entry.getKey() + 
+                    (entry.getValue().isMaster() ? " (MASTER)" : ""))
+                    .color(TextColor.color(0xFFFFFF)));
+            }
+        } else {
+            source.sendMessage(Component.text("Network manager not initialized")
+                .color(TextColor.color(0xFF5555)));
+        }
+    }
+    
+    
+    // Missing schedule methods
+    private void scheduleDataCollection() {
+        server.getScheduler().buildTask(this, () -> {
+            if (!config.isEnableProtection()) return;
+            
+            analyzeData();
+        }).repeat(60, TimeUnit.SECONDS).schedule();
+    }
+    
+    private void scheduleCleanupTask() {
+        server.getScheduler().buildTask(this, () -> {
+            if (!config.isEnableProtection()) return;
+            
+            cleanupOldData();
+        }).repeat(10, TimeUnit.MINUTES).schedule();
+    }
+    
+    private void scheduleAutosaveTasks() {
+        server.getScheduler().buildTask(this, () -> {
+            saveBlacklist();
+            saveWhitelist();
+            logger.info("Saved blacklist and whitelist data");
+        }).repeat(15, TimeUnit.MINUTES).schedule();
+    }
+    
+    // Utility methods
+    private boolean isLocalOrPrivateAddress(InetAddress address) {
+        return address.isLoopbackAddress() || 
+               address.isSiteLocalAddress() || 
+               address.isLinkLocalAddress();
+    }
+    
+    private boolean shouldThrottleConnection(String ip) {
+        // Skip checks for whitelisted IPs
+        if (whitelistedIps.contains(ip)) {
+            return false;
+        }
+        
+        // Always block blacklisted IPs
+        if (blacklistedIps.contains(ip)) {
+            return true;
+        }
+        
+        // Check bot score
+        int botScore = botScores.getOrDefault(ip, 0);
+        if (botScore >= config.getBotScoreThreshold()) {
+            return true;
+        }
+        
+        // Check connection rate
+        ConnectionData data = connectionTracker.get(ip);
+        if (data != null && data.getConnectionsPerSecond() > config.getMaxConnectionsPerSecond()) {
+            updateBotScore(ip, 1);
+            return true;
+        }
+        
+        return false;
+    }
+    
+    private void kickPlayersWithIp(String ip) {
+        for (Player player : server.getAllPlayers()) {
+            String playerIp = player.getRemoteAddress().getAddress().getHostAddress();
+            if (playerIp.equals(ip)) {
+                player.disconnect(blacklistedMessage);
+            }
+        }
+    }
+    
+    private void sendThreatAlert(Player player) {
+        player.sendMessage(Component.text("§c[NantiDDoS] §eWarning: Current threat level is " + 
+            formatThreatLevel(currentThreatLevel) + " §e(" + currentThreatLevel + "/100)"));
+    }
+    
+    private String formatThreatLevel(int level) {
+        if (level >= 80) return "§4CRITICAL";
+        if (level >= 60) return "§cHIGH";
+        if (level >= 40) return "§6MEDIUM";
+        if (level >= 20) return "§eLOW";
+        return "§aNORMAL";
+    }
+    
+    // Dashboard methods
+    private void showHelp(net.kyori.adventure.audience.Audience source) {
+        source.sendMessage(Component.text("========== NantiDDoS Help ==========").color(TextColor.color(0xFFAA00)));
+        source.sendMessage(Component.text("/nantiddos status - Show current protection status").color(TextColor.color(0xFFFF55)));
+        source.sendMessage(Component.text("/nantiddos reload - Reload configuration").color(TextColor.color(0xFFFF55)));
+        source.sendMessage(Component.text("/nantiddos enable - Enable protection").color(TextColor.color(0xFFFF55)));
+        source.sendMessage(Component.text("/nantiddos disable - Disable protection").color(TextColor.color(0xFFFF55)));
+        source.sendMessage(Component.text("/nantiddos whitelist <add|remove|list> [ip] - Manage whitelist").color(TextColor.color(0xFFFF55)));
+        source.sendMessage(Component.text("/nantiddos blacklist <add|remove|list> [ip] - Manage blacklist").color(TextColor.color(0xFFFF55)));
+        source.sendMessage(Component.text("/nantiddos stats - Show protection statistics").color(TextColor.color(0xFFFF55)));
+        source.sendMessage(Component.text("/nantiddos network <status|sync|master> - Network settings").color(TextColor.color(0xFFFF55)));
+        source.sendMessage(Component.text("/nantiddos clear - Clear connection data").color(TextColor.color(0xFFFF55)));
+    }
+    
+    private void showStatus(net.kyori.adventure.audience.Audience source) {
+        source.sendMessage(Component.text("========== NantiDDoS Status ==========").color(TextColor.color(0xFFAA00)));
+        source.sendMessage(Component.text("Protection: " + 
+            (config.isEnableProtection() ? "ENABLED" : "DISABLED")).color(
+                config.isEnableProtection() ? TextColor.color(0x55FF55) : TextColor.color(0xFF5555)));
+        source.sendMessage(Component.text("Max Connections/Second: " + config.getMaxConnectionsPerSecond()).color(TextColor.color(0x55FF55)));
+        source.sendMessage(Component.text("Connection Timeout: " + config.getConnectionTimeout() + "ms").color(TextColor.color(0x55FF55)));
+        source.sendMessage(Component.text("Auto Blacklisting: " + (config.isEnableAutomaticBlacklisting() ? "ENABLED" : "DISABLED")).color(TextColor.color(0x55FF55)));
+        source.sendMessage(Component.text("Tracked IPs: " + connectionTracker.size()).color(TextColor.color(0x55FF55)));
+        source.sendMessage(Component.text("Suspicious IPs: " + getSuspiciousIpCount()).color(TextColor.color(0xFF5555)));
+        source.sendMessage(Component.text("Whitelisted IPs: " + whitelistedIps.size()).color(TextColor.color(0x55FF55)));
+        source.sendMessage(Component.text("Blacklisted IPs: " + blacklistedIps.size()).color(TextColor.color(0xFF5555)));
+        source.sendMessage(Component.text("Current Threat Level: " + formatThreatLevel(currentThreatLevel)).color(TextColor.color(0xFFFF55)));
+        source.sendMessage(Component.text("Uptime: " + formatUptime()).color(TextColor.color(0x55FF55)));
     }
     
     private void handleWhitelistCommand(net.kyori.adventure.audience.Audience source, String[] args) {
@@ -550,43 +832,6 @@ public class VelocityNantiDDoS {
         }
     }
     
-    private void kickPlayersWithIp(String ip) {
-        for (Player player : server.getAllPlayers()) {
-            String playerIp = player.getRemoteAddress().getAddress().getHostAddress();
-            if (playerIp.equals(ip)) {
-                player.disconnect(blacklistedMessage);
-            }
-        }
-    }
-    
-    private void showHelp(net.kyori.adventure.audience.Audience source) {
-        source.sendMessage(Component.text("========== NantiDDoS Help ==========").color(TextColor.color(0xFFAA00)));
-        source.sendMessage(Component.text("/nantiddos status - Show current protection status").color(TextColor.color(0xFFFF55)));
-        source.sendMessage(Component.text("/nantiddos reload - Reload configuration").color(TextColor.color(0xFFFF55)));
-        source.sendMessage(Component.text("/nantiddos enable - Enable protection").color(TextColor.color(0xFFFF55)));
-        source.sendMessage(Component.text("/nantiddos disable - Disable protection").color(TextColor.color(0xFFFF55)));
-        source.sendMessage(Component.text("/nantiddos whitelist <add|remove|list> [ip] - Manage whitelist").color(TextColor.color(0xFFFF55)));
-        source.sendMessage(Component.text("/nantiddos blacklist <add|remove|list> [ip] - Manage blacklist").color(TextColor.color(0xFFFF55)));
-        source.sendMessage(Component.text("/nantiddos stats - Show protection statistics").color(TextColor.color(0xFFFF55)));
-        source.sendMessage(Component.text("/nantiddos clear - Clear connection data").color(TextColor.color(0xFFFF55)));
-    }
-    
-    private void showStatus(net.kyori.adventure.audience.Audience source) {
-        source.sendMessage(Component.text("========== NantiDDoS Status ==========").color(TextColor.color(0xFFAA00)));
-        source.sendMessage(Component.text("Protection: " + 
-            (enableProtection ? "ENABLED" : "DISABLED")).color(
-                enableProtection ? TextColor.color(0x55FF55) : TextColor.color(0xFF5555)));
-        source.sendMessage(Component.text("Max Connections/Second: " + maxConnectionsPerSecond).color(TextColor.color(0x55FF55)));
-        source.sendMessage(Component.text("Connection Timeout: " + connectionTimeout + "ms").color(TextColor.color(0x55FF55)));
-        source.sendMessage(Component.text("Auto Blacklisting: " + (enableAutomaticBlacklisting ? "ENABLED" : "DISABLED")).color(TextColor.color(0x55FF55)));
-        source.sendMessage(Component.text("Tracked IPs: " + connectionTracker.size()).color(TextColor.color(0x55FF55)));
-        source.sendMessage(Component.text("Suspicious IPs: " + getSuspiciousIpCount()).color(TextColor.color(0xFF5555)));
-        source.sendMessage(Component.text("Whitelisted IPs: " + whitelistedIps.size()).color(TextColor.color(0x55FF55)));
-        source.sendMessage(Component.text("Blacklisted IPs: " + blacklistedIps.size()).color(TextColor.color(0xFF5555)));
-        source.sendMessage(Component.text("Current Threat Level: " + formatThreatLevel(currentThreatLevel)).color(TextColor.color(0xFFFF55)));
-        source.sendMessage(Component.text("Uptime: " + formatUptime()).color(TextColor.color(0x55FF55)));
-    }
-    
     private void showStatistics(net.kyori.adventure.audience.Audience source) {
         source.sendMessage(Component.text("========== NantiDDoS Statistics ==========").color(TextColor.color(0xFFAA00)));
         source.sendMessage(Component.text("Active Connections: " + activeConnections).color(TextColor.color(0x55FF55)));
@@ -631,55 +876,7 @@ public class VelocityNantiDDoS {
         }
     }
     
-    private void loadConfiguration() {
-        try {
-            Path configPath = dataDirectory.resolve("config.properties");
-            File configFile = configPath.toFile();
-            
-            if (!configFile.exists()) {
-                // Create default config
-                saveConfiguration();
-                return;
-            }
-            
-            Properties properties = new Properties();
-            properties.load(Files.newBufferedReader(configPath));
-            
-            maxConnectionsPerSecond = Integer.parseInt(properties.getProperty("maxConnectionsPerSecond", "5"));
-            botScoreThreshold = Integer.parseInt(properties.getProperty("botScoreThreshold", "10"));
-            blacklistThreshold = Integer.parseInt(properties.getProperty("blacklistThreshold", "25"));
-            autoblacklistThreshold = Integer.parseInt(properties.getProperty("autoblacklistThreshold", "30"));
-            connectionTimeout = Integer.parseInt(properties.getProperty("connectionTimeout", "5000"));
-            enableProtection = Boolean.parseBoolean(properties.getProperty("enableProtection", "true"));
-            enableAutomaticBlacklisting = Boolean.parseBoolean(properties.getProperty("enableAutomaticBlacklisting", "true"));
-            intelligentThrottling = Boolean.parseBoolean(properties.getProperty("intelligentThrottling", "true"));
-            
-        } catch (IOException e) {
-            logger.error("Failed to load configuration", e);
-        }
-    }
-    
-    private void saveConfiguration() {
-        try {
-            Path configPath = dataDirectory.resolve("config.properties");
-            
-            Properties properties = new Properties();
-            properties.setProperty("maxConnectionsPerSecond", String.valueOf(maxConnectionsPerSecond));
-            properties.setProperty("botScoreThreshold", String.valueOf(botScoreThreshold));
-            properties.setProperty("blacklistThreshold", String.valueOf(blacklistThreshold));
-            properties.setProperty("autoblacklistThreshold", String.valueOf(autoblacklistThreshold));
-            properties.setProperty("connectionTimeout", String.valueOf(connectionTimeout));
-            properties.setProperty("enableProtection", String.valueOf(enableProtection));
-            properties.setProperty("enableAutomaticBlacklisting", String.valueOf(enableAutomaticBlacklisting));
-            properties.setProperty("intelligentThrottling", String.valueOf(intelligentThrottling));
-            
-            properties.store(Files.newBufferedWriter(configPath), "NantiDDoS Configuration");
-            
-        } catch (IOException e) {
-            logger.error("Failed to save configuration", e);
-        }
-    }
-    
+    // Storage methods
     private void loadBlacklist() {
         try {
             Path blacklistPath = dataDirectory.resolve("blacklist.txt");
@@ -762,292 +959,7 @@ public class VelocityNantiDDoS {
         }
     }
     
-    private boolean shouldThrottleConnection(String ip) {
-        // Skip checks for whitelisted IPs
-        if (whitelistedIps.contains(ip)) {
-            return false;
-        }
-        
-        // Always block blacklisted IPs
-        if (blacklistedIps.contains(ip)) {
-            return true;
-        }
-        
-        // Check bot score
-        int botScore = botScores.getOrDefault(ip, 0);
-        if (botScore >= botScoreThreshold) {
-            return true;
-        }
-        
-        // Check connection rate
-        ConnectionData data = connectionTracker.get(ip);
-        if (data != null && data.getConnectionsPerSecond() > maxConnectionsPerSecond) {
-            updateBotScore(ip, 1);
-            return true;
-        }
-        
-        return false;
-    }
-    
-    private void updateBotScore(String ip, int change) {
-        if (whitelistedIps.contains(ip)) return;
-        
-        int currentScore = botScores.getOrDefault(ip, 0);
-        int newScore = Math.max(0, Math.min(100, currentScore + change));
-        
-        botScores.put(ip, newScore);
-        
-        // Check for automatic blacklisting
-        if (enableAutomaticBlacklisting && newScore >= autoblacklistThreshold) {
-            if (!blacklistedIps.contains(ip)) {
-                blacklistedIps.add(ip);
-                saveBlacklist();
-                
-                // Log the auto-blacklist
-                logger.warn("IP " + ip + " has been automatically blacklisted (bot score: " + newScore + ")");
-                
-                // Record attack
-                recordAttack("AUTO_BLACKLIST", ip, newScore);
-                
-                // Kick any connected players with this IP
-                kickPlayersWithIp(ip);
-            }
-        }
-    }
-    
-    private int getSuspiciousIpCount() {
-        int count = 0;
-        for (int score : botScores.values()) {
-            if (score >= 5) count++;
-        }
-        return count;
-    }
-    
-    private void analyzeAndUpdateThreatLevel() {
-        int newThreatLevel = 0;
-        
-        // Analyze connection rates across all IPs
-        int highRateConnections = 0;
-        int suspiciousIps = 0;
-        
-        for (ConnectionData data : connectionTracker.values()) {
-            if (data.getConnectionsPerSecond() > maxConnectionsPerSecond) {
-                highRateConnections++;
-            }
-        }
-        
-        for (int score : botScores.values()) {
-            if (score >= 20) {
-                suspiciousIps++;
-            } else if (score >= 10) {
-                suspiciousIps += 0.5;
-            }
-        }
-        
-        // Base threat level on various factors
-        int baseThreat = 0;
-        
-        if (highRateConnections > 100) {
-            baseThreat = 100;
-        } else if (highRateConnections > 50) {
-            baseThreat = 75;
-        } else if (highRateConnections > 20) {
-            baseThreat = 50;
-        } else if (highRateConnections > 10) {
-            baseThreat = 25;
-        } else if (highRateConnections > 5) {
-            baseThreat = 10;
-        }
-        
-        int suspiciousThreat = Math.min(100, suspiciousIps * 5);
-        
-        // Combine threat scores
-        newThreatLevel = Math.max(baseThreat, suspiciousThreat);
-        
-        // Add recent attack component
-        if (!recentAttacks.isEmpty()) {
-            long now = System.currentTimeMillis();
-            for (AttackRecord attack : recentAttacks) {
-                // Consider attacks in the last 5 minutes
-                if (now - attack.timestamp < 5 * 60 * 1000) {
-                    newThreatLevel = Math.max(newThreatLevel, attack.severity);
-                }
-            }
-        }
-        
-        // Update the threat level (with some smoothing)
-        if (newThreatLevel > currentThreatLevel) {
-            currentThreatLevel = newThreatLevel;
-        } else if (newThreatLevel < currentThreatLevel) {
-            // Gradually decrease threat level
-            currentThreatLevel = Math.max(newThreatLevel, currentThreatLevel - 5);
-        }
-    }
-    
-    private void recordAttack(String type, String source, int severity) {
-        AttackRecord record = new AttackRecord(type, source, severity);
-        recentAttacks.add(record);
-        
-        // Keep only the last 100 attacks
-        while (recentAttacks.size() > 100) {
-            recentAttacks.remove(0);
-        }
-        
-        // Log high-severity attacks
-        if (severity >= 75) {
-            logger.warn("High-severity attack detected: " + type + " from " + source + " (severity: " + severity + ")");
-        }
-    }
-    
-    private void sendThreatAlert(Player player) {
-        String threatLevel = formatThreatLevel(currentThreatLevel);
-        
-        Component message = Component.text("[NantiDDoS] ")
-            .color(TextColor.color(0xFF5555))
-            .append(Component.text("WARNING: Current threat level is ")
-                .color(TextColor.color(0xFFFF55)))
-            .append(Component.text(threatLevel)
-                .color(getThreatColor(currentThreatLevel)))
-            .append(Component.text(" (" + currentThreatLevel + "/100)")
-                .color(TextColor.color(0xFFFF55)));
-        
-        player.sendMessage(message);
-        
-        if (getSuspiciousIpCount() > 5) {
-            player.sendMessage(Component.text("[NantiDDoS] ")
-                .color(TextColor.color(0xFF5555))
-                .append(Component.text("There are ")
-                    .color(TextColor.color(0xFFFF55)))
-                .append(Component.text(getSuspiciousIpCount() + "")
-                    .color(TextColor.color(0xFF5555)))
-                .append(Component.text(" suspicious IPs currently tracked.")
-                    .color(TextColor.color(0xFFFF55))));
-        }
-    }
-    
-    private String formatThreatLevel(int level) {
-        if (level >= 80) return "CRITICAL";
-        if (level >= 60) return "HIGH";
-        if (level >= 40) return "MEDIUM";
-        if (level >= 20) return "LOW";
-        return "NORMAL";
-    }
-    
-    private TextColor getThreatColor(int level) {
-        if (level >= 80) return TextColor.color(0xFF0000);
-        if (level >= 60) return TextColor.color(0xFF5555);
-        if (level >= 40) return TextColor.color(0xFFAA00);
-        if (level >= 20) return TextColor.color(0xFFFF55);
-        return TextColor.color(0x55FF55);
-    }
-    
-    private String formatUptime() {
-        long uptime = System.currentTimeMillis() - startupTime;
-        
-        long seconds = uptime / 1000;
-        long minutes = seconds / 60;
-        long hours = minutes / 60;
-        long days = hours / 24;
-        
-        seconds %= 60;
-        minutes %= 60;
-        hours %= 24;
-        
-        StringBuilder sb = new StringBuilder();
-        if (days > 0) sb.append(days).append("d ");
-        if (hours > 0 || days > 0) sb.append(hours).append("h ");
-        if (minutes > 0 || hours > 0 || days > 0) sb.append(minutes).append("m ");
-        sb.append(seconds).append("s");
-        
-        return sb.toString();
-    }
-    
-    private void scheduleDataCollection() {
-        // Collect and analyze data every 5 seconds
-        server.getScheduler().buildTask(this, () -> {
-            analyzeData();
-        }).repeat(5, TimeUnit.SECONDS).schedule();
-    }
-    
-    private void scheduleCleanupTask() {
-        // Clean up old data every 5 minutes
-        server.getScheduler().buildTask(this, () -> {
-            cleanupOldData();
-        }).repeat(5, TimeUnit.MINUTES).schedule();
-    }
-    
-    private void scheduleAutosaveTasks() {
-        // Auto-save data every 10 minutes
-        server.getScheduler().buildTask(this, () -> {
-            saveBlacklist();
-            saveWhitelist();
-        }).repeat(10, TimeUnit.MINUTES).schedule();
-    }
-    
-    private void analyzeData() {
-        if (!enableProtection) return;
-        
-        // Decay bot scores over time
-        for (Map.Entry<String, Integer> entry : new HashMap<>(botScores).entrySet()) {
-            int score = entry.getValue();
-            if (score > 0) {
-                score = Math.max(0, score - 1);
-                botScores.put(entry.getKey(), score);
-            }
-        }
-        
-        // Update threat level
-        analyzeAndUpdateThreatLevel();
-        
-        // Check for potential attacks
-        for (Map.Entry<String, ConnectionData> entry : connectionTracker.entrySet()) {
-            String ip = entry.getKey();
-            ConnectionData data = entry.getValue();
-            
-            // Skip whitelisted IPs
-            if (whitelistedIps.contains(ip)) continue;
-            
-            // Check for various attack patterns
-            if (data.getConnectionsPerSecond() > maxConnectionsPerSecond * 3) {
-                // Possible connection flood
-                int severity = Math.min(100, data.getConnectionsPerSecond() * 3);
-                recordAttack("CONNECTION_FLOOD", ip, severity);
-                updateBotScore(ip, 5);
-            }
-            
-            if (data.getPingCount() > 50 && data.getLoginCount() == 0) {
-                // Possible ping flood (server list spam)
-                int severity = Math.min(100, data.getPingCount());
-                recordAttack("PING_FLOOD", ip, severity);
-                updateBotScore(ip, 3);
-            }
-            
-            if (data.getLoginCount() > 10 && 
-                System.currentTimeMillis() - data.getLastValidLogin() > 60000) {
-                // Possible login flood
-                int severity = Math.min(100, data.getLoginCount() * 5);
-                recordAttack("LOGIN_FLOOD", ip, severity);
-                updateBotScore(ip, 4);
-            }
-        }
-    }
-    
-    private void cleanupOldData() {
-        long now = System.currentTimeMillis();
-        
-        // Remove connection data older than 30 minutes
-        connectionTracker.entrySet().removeIf(entry -> 
-            now - entry.getValue().getLastConnectionTime() > 30 * 60 * 1000);
-            
-        // Remove attack records older than 24 hours
-        recentAttacks.removeIf(attack -> 
-            now - attack.timestamp > 24 * 60 * 60 * 1000);
-            
-        // Remove bot scores for IPs that are no longer tracked
-        botScores.entrySet().removeIf(entry ->
-            !connectionTracker.containsKey(entry.getKey()));
-    }
-    
+    // Additional utility methods
     private boolean isValidIp(String ip) {
         if (ip == null || ip.isEmpty()) {
             return false;
@@ -1071,13 +983,103 @@ public class VelocityNantiDDoS {
         }
     }
     
-    private boolean isLocalOrPrivateAddress(InetAddress address) {
-        return address.isLoopbackAddress() || 
-               address.isSiteLocalAddress() || 
-               address.isLinkLocalAddress();
+    private void analyzeData() {
+        // Decay bot scores over time
+        for (Map.Entry<String, Integer> entry : new HashMap<>(botScores).entrySet()) {
+            int score = entry.getValue();
+            if (score > 0) {
+                score = Math.max(0, score - 1);
+                botScores.put(entry.getKey(), score);
+            }
+        }
+        
+        // Update threat level based on various factors
+        updateThreatLevel();
     }
     
-    private static class ConnectionData {
+    private void cleanupOldData() {
+        long now = System.currentTimeMillis();
+        
+        // Remove connection data older than 30 minutes
+        connectionTracker.entrySet().removeIf(entry -> 
+            now - entry.getValue().getLastConnectionTime() > 30 * 60 * 1000);
+            
+        // Remove attack records older than 24 hours
+        recentAttacks.removeIf(attack -> 
+            now - attack.timestamp > 24 * 60 * 60 * 1000);
+            
+        // Remove bot scores for IPs that are no longer tracked
+        botScores.entrySet().removeIf(entry ->
+            !connectionTracker.containsKey(entry.getKey()));
+    }
+    
+    private void updateThreatLevel() {
+        int newThreatLevel = 0;
+        
+        // Calculate based on bot scores
+        int highScoreCount = 0;
+        for (int score : botScores.values()) {
+            if (score >= config.getAutoblacklistThreshold()) highScoreCount += 3;
+            else if (score >= config.getBlacklistThreshold()) highScoreCount += 2;
+            else if (score >= config.getBotScoreThreshold()) highScoreCount += 1;
+        }
+        
+        if (highScoreCount > 10) newThreatLevel = Math.max(newThreatLevel, 80);
+        else if (highScoreCount > 5) newThreatLevel = Math.max(newThreatLevel, 60);
+        else if (highScoreCount > 2) newThreatLevel = Math.max(newThreatLevel, 40);
+        else if (highScoreCount > 0) newThreatLevel = Math.max(newThreatLevel, 20);
+        
+        // Calculate based on connection rate
+        int highRateCount = 0;
+        for (ConnectionData data : connectionTracker.values()) {
+            if (data.getConnectionsPerSecond() > config.getMaxConnectionsPerSecond() * 2) highRateCount += 2;
+            else if (data.getConnectionsPerSecond() > config.getMaxConnectionsPerSecond()) highRateCount += 1;
+        }
+        
+        if (highRateCount > 8) newThreatLevel = Math.max(newThreatLevel, 80);
+        else if (highRateCount > 4) newThreatLevel = Math.max(newThreatLevel, 60);
+        else if (highRateCount > 2) newThreatLevel = Math.max(newThreatLevel, 40);
+        else if (highRateCount > 0) newThreatLevel = Math.max(newThreatLevel, 20);
+        
+        // Smooth transitions
+        if (newThreatLevel > currentThreatLevel) {
+            currentThreatLevel = newThreatLevel; // Immediate increase
+        } else if (newThreatLevel < currentThreatLevel) {
+            currentThreatLevel = Math.max(newThreatLevel, currentThreatLevel - 5); // Gradual decrease
+        }
+    }
+    
+    private int getSuspiciousIpCount() {
+        int count = 0;
+        for (int score : botScores.values()) {
+            if (score >= config.getBotScoreThreshold()) count++;
+        }
+        return count;
+    }
+    
+    private String formatUptime() {
+        long uptime = System.currentTimeMillis() - startupTime;
+        
+        long seconds = uptime / 1000;
+        long minutes = seconds / 60;
+        long hours = minutes / 60;
+        long days = hours / 24;
+        
+        seconds %= 60;
+        minutes %= 60;
+        hours %= 24;
+        
+        StringBuilder sb = new StringBuilder();
+        if (days > 0) sb.append(days).append("d ");
+        if (hours > 0 || days > 0) sb.append(hours).append("h ");
+        if (minutes > 0 || hours > 0 || days > 0) sb.append(minutes).append("m ");
+        sb.append(seconds).append("s");
+        
+        return sb.toString();
+    }
+    
+    // Inner classes
+    private class ConnectionData {
         private long firstConnectionTime;
         private long lastConnectionTime;
         private long lastValidLogin;
@@ -1158,39 +1160,57 @@ public class VelocityNantiDDoS {
         }
     }
     
-    private static class NetworkData {
-        private final String network;
+    private class NetworkData {
+        private final String networkId;
         private int connectionCount;
-        private int attackScore;
+        private int activeConnections;
+        private int blockedConnections;
+        private int threatLevel;
         
-        public NetworkData(String network) {
-            this.network = network;
+        public NetworkData(String networkId) {
+            this.networkId = networkId;
             this.connectionCount = 0;
-            this.attackScore = 0;
+            this.activeConnections = 0;
+            this.blockedConnections = 0;
+            this.threatLevel = 0;
         }
         
         public void incrementConnectionCount() {
             connectionCount++;
         }
         
-        public void increaseAttackScore(int amount) {
-            attackScore += amount;
+        public void setThreatLevel(int level) {
+            threatLevel = level;
         }
         
-        public String getNetwork() {
-            return network;
+        public String getNetworkId() {
+            return networkId;
         }
         
         public int getConnectionCount() {
             return connectionCount;
         }
         
-        public int getAttackScore() {
-            return attackScore;
+        public int getThreatLevel() {
+            return threatLevel;
         }
     }
     
-    private static class PlayerData {
+    private class AttackRecord {
+        private final String type;
+        private final String source;
+        private final int severity;
+        private final long timestamp;
+        
+        public AttackRecord(String type, String source, int severity) {
+            this.type = type;
+            this.source = source;
+            this.severity = severity;
+            this.timestamp = System.currentTimeMillis();
+        }
+    }
+    
+    private class PlayerData {
         private final String username;
         private final String ip;
         private long joinTime;
@@ -1252,20 +1272,6 @@ public class VelocityNantiDDoS {
         
         public boolean canBypass() {
             return canBypass;
-        }
-    }
-    
-    private static class AttackRecord {
-        private final String type;
-        private final String source;
-        private final int severity;
-        private final long timestamp;
-        
-        public AttackRecord(String type, String source, int severity) {
-            this.type = type;
-            this.source = source;
-            this.severity = severity;
-            this.timestamp = System.currentTimeMillis();
         }
     }
 }

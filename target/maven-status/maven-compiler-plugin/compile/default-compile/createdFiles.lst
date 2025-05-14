@@ -3,6 +3,7 @@ id\nantiddos\dashboard\SecurityConsole.class
 id\nantiddos\protection\ConnectionTracker$ConnectionData.class
 id\nantiddos\protection\PacketMonitor$1.class
 id\nantiddos\protection\AttackDetector$AttackType.class
+id\nantiddos\VelocityNantiDDoS$1.class
 id\nantiddos\VelocityNantiDDoS$ConnectionData.class
 id\nantiddos\network\ProxyIntegration.class
 id\nantiddos\VelocityNantiDDoS.class
@@ -12,6 +13,7 @@ id\nantiddos\protection\AttackDetector$AttackData.class
 id\nantiddos\protection\PacketMonitor$PacketDataInfo.class
 id\nantiddos\notification\NotificationManager.class
 id\nantiddos\protection\AttackDetector$AttackSignature.class
+id\nantiddos\VelocityNantiDDoS$AttackRecord.class
 id\nantiddos\notification\NotificationManager$NotificationType.class
 id\nantiddos\protection\AttackDetector$AlertLevel.class
 id\nantiddos\protection\IPManager.class
@@ -29,6 +31,8 @@ id\nantiddos\protection\AttackDetector.class
 id\nantiddos\protection\PacketMonitor$IpPacketInfo.class
 id\nantiddos\analytics\SecurityMetrics$DailyMetrics.class
 id\nantiddos\protection\PacketMonitor$IpPacketStatistics.class
+id\nantiddos\VelocityNantiDDoS$NetworkData.class
+id\nantiddos\VelocityNantiDDoS$PlayerData.class
 id\nantiddos\network\ProxyIntegration$ServerInfo.class
 id\nantiddos\analytics\SecurityMetrics$AttackRecord.class
 id\nantiddos\dashboard\SecurityConsole$1.class
