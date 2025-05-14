@@ -222,19 +222,43 @@ public class PacketMonitor implements Listener {
                         }
                         
                         if (event.getPacketType() == com.comphenix.protocol.PacketType.Play.Client.CUSTOM_PAYLOAD) {
-                            com.comphenix.protocol.events.PacketContainer packet = event.getPacket();
-                            String channel = packet.getStrings().read(0);
-                            
-                            if (channel != null && channel.length() > 128) {
-                                event.setCancelled(true);
-                                data.increaseThrottleCount();
-                                data.increaseThreatLevel();
+                            try {
+                                com.comphenix.protocol.events.PacketContainer packet = event.getPacket();
+                                String channel = null;
                                 
-                                logger.warning("Blocked suspicious custom payload packet from player: " + player.getName());
-                                
-                                if (data.getThreatLevel() == ThreatLevel.HIGH && autobanEnabled) {
-                                    applyAutomaticBan(player);
+                                try {
+                                    if (packet.getStrings().size() > 0) {
+                                        channel = packet.getStrings().read(0);
+                                    } else {
+                                        Object payload = packet.getModifier().read(0);
+                                        if (payload != null && payload.toString().contains("id=")) {
+                                            String payloadStr = payload.toString();
+                                            int idIndex = payloadStr.indexOf("id=") + 3;
+                                            int commaIndex = payloadStr.indexOf(",", idIndex);
+                                            if (commaIndex == -1) commaIndex = payloadStr.indexOf("]", idIndex);
+                                            
+                                            if (commaIndex > idIndex) {
+                                                channel = payloadStr.substring(idIndex, commaIndex);
+                                            }
+                                        }
+                                    }
+                                } catch (Exception e) {
+                                    logger.fine("Could not read custom payload channel: " + e.getMessage());
                                 }
+                                
+                                if (channel != null && channel.length() > 128) {
+                                    event.setCancelled(true);
+                                    data.increaseThrottleCount();
+                                    data.increaseThreatLevel();
+                                    
+                                    logger.warning("Blocked suspicious custom payload packet from player: " + player.getName());
+                                    
+                                    if (data.getThreatLevel() == ThreatLevel.HIGH && autobanEnabled) {
+                                        applyAutomaticBan(player);
+                                    }
+                                }
+                            } catch (Exception ex) {
+                                logger.warning("Error processing custom payload packet: " + ex.getMessage());
                             }
                         }
                     }
