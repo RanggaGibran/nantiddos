@@ -1,6 +1,7 @@
 package id.nantiddos;
 
 import id.nantiddos.dashboard.SecurityConsole;
+import id.nantiddos.notification.NotificationManager;
 import id.nantiddos.protection.AttackDetector;
 import id.nantiddos.protection.ConnectionTracker;
 import id.nantiddos.protection.ConnectionTracker.ConnectionType;
@@ -38,6 +39,7 @@ public class Nantiddos extends JavaPlugin implements Listener {
     private PacketMonitor packetMonitor;
     private SecurityConsole securityConsole;
     private AttackDetector attackDetector;
+    private NotificationManager notificationManager;
     
     private int maxConnectionsPerSecond;
     private int connectionTimeout;
@@ -70,6 +72,9 @@ public class Nantiddos extends JavaPlugin implements Listener {
             attackDetector = new AttackDetector(this, connectionTracker, ipManager, packetMonitor);
             logger.info("Attack pattern recognition system initialized");
             
+            notificationManager = new NotificationManager(this);
+            logger.info("External notification system initialized");
+            
             securityConsole = new SecurityConsole(this, connectionTracker, ipManager, packetMonitor);
             logger.info("Security dashboard initialized");
         }, 40L);
@@ -96,6 +101,10 @@ public class Nantiddos extends JavaPlugin implements Listener {
             attackDetector.shutdown();
         }
         
+        if (notificationManager != null) {
+            notificationManager.shutdown();
+        }
+        
         if (securityConsole != null) {
             securityConsole.shutdown();
         }
@@ -106,6 +115,26 @@ public class Nantiddos extends JavaPlugin implements Listener {
     
     public static Nantiddos getInstance() {
         return instance;
+    }
+    
+    public NotificationManager getNotificationManager() {
+        return notificationManager;
+    }
+    
+    public ConnectionTracker getConnectionTracker() {
+        return connectionTracker;
+    }
+    
+    public IPManager getIpManager() {
+        return ipManager;
+    }
+    
+    public AttackDetector getAttackDetector() {
+        return attackDetector;
+    }
+    
+    public PacketMonitor getPacketMonitor() {
+        return packetMonitor;
     }
     
     private void loadConfiguration() {
@@ -374,7 +403,16 @@ public class Nantiddos extends JavaPlugin implements Listener {
             attackDetector.loadConfig();
         }
         
+        if (notificationManager != null) {
+            notificationManager.loadConfig();
+        }
+        
         sender.sendMessage("§aNantiDDoS configuration reloaded successfully!");
+        
+        if (notificationManager != null && notificationManager.isEnabled()) {
+            String actor = sender instanceof Player ? sender.getName() : "Console";
+            notificationManager.notifyConfigChanged(actor);
+        }
     }
     
     private void showStatus(CommandSender sender) {
@@ -429,6 +467,11 @@ public class Nantiddos extends JavaPlugin implements Listener {
         }
         
         sender.sendMessage("§aNantiDDoS protection " + (enable ? "enabled" : "disabled") + "!");
+        
+        if (notificationManager != null && notificationManager.isEnabled()) {
+            String actor = sender instanceof Player ? sender.getName() : "Console";
+            notificationManager.notifyProtectionToggled(enable, actor);
+        }
     }
     
     private void clearData(CommandSender sender) {
@@ -501,7 +544,7 @@ public class Nantiddos extends JavaPlugin implements Listener {
         }
         
         if (player.hasPermission("nantiddos.admin") && notifyAdmins) {
-            Bukkit.getScheduler().runTaskLater(this, () -> {
+            Bukkit.getScheduler().runTaskLater(Nantiddos.this, () -> {
                 player.sendMessage("§a[NantiDDoS] §eProtection is currently " + 
                     (enableProtection ? "§aENABLED" : "§cDISABLED"));
             }, 20L);

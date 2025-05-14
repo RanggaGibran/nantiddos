@@ -1,6 +1,7 @@
 package id.nantiddos.protection;
 
 import id.nantiddos.Nantiddos;
+import id.nantiddos.notification.NotificationManager;
 
 import java.net.InetAddress;
 import java.util.ArrayList;
@@ -8,10 +9,12 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.EnumMap;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Queue;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -223,10 +226,10 @@ public class AttackDetector {
     private void analyzePacketPatterns() {
         if (packetMonitor == null || !packetMonitor.isPacketMonitoringFullyAvailable()) return;
         
-        Map<UUID, PacketMonitor.PlayerPacketData> packetData = packetMonitor.getPacketDataMap();
-        Map<String, PacketMonitor.IpPacketStatistics> ipStats = packetMonitor.getIpStatisticsMap();
+        Map<UUID, PacketMonitor.PacketDataInfo> packetData = packetMonitor.getPacketDataMap();
+        Map<String, PacketMonitor.IpPacketInfo> ipStats = packetMonitor.getIpStatisticsMap();
         
-        for (Map.Entry<String, PacketMonitor.IpPacketStatistics> entry : ipStats.entrySet()) {
+        for (Map.Entry<String, PacketMonitor.IpPacketInfo> entry : ipStats.entrySet()) {
             String ip = entry.getKey();
             
             if (ipManager.isWhitelisted(ip)) continue;
@@ -248,7 +251,7 @@ public class AttackDetector {
             
             if (ipManager.isWhitelisted(ip) || !packetData.containsKey(playerId)) continue;
             
-            PacketMonitor.PlayerPacketData playerData = packetData.get(playerId);
+            PacketMonitor.PacketDataInfo playerData = packetData.get(playerId);
             AttackData attackData = attackDataMap.computeIfAbsent(ip, k -> new AttackData(ip));
             
             if (playerData.getThreatLevel().getLevel() >= 3) {
@@ -399,6 +402,13 @@ public class AttackDetector {
                     }
                 }
                 
+                // Send notification
+                NotificationManager notificationManager = plugin.getNotificationManager();
+                if (notificationManager != null && notificationManager.isEnabled()) {
+                    String reason = "Attack pattern detected: " + data.getPrimaryAttackType().getName();
+                    notificationManager.notifyBlacklisted(ip, reason);
+                }
+                
                 for (Player player : Bukkit.getOnlinePlayers()) {
                     if (player.getAddress() != null && ip.equals(player.getAddress().getAddress().getHostAddress())) {
                         player.kickPlayer("§c§lYour IP has been blacklisted for detected attack pattern: " + 
@@ -415,11 +425,20 @@ public class AttackDetector {
         
         logger.warning("Attack detected: " + type.getName() + " from " + ips.size() + " IPs");
         
+        // Notify in-game admins
         for (Player admin : Bukkit.getOnlinePlayers()) {
             if (admin.hasPermission("nantiddos.admin")) {
                 admin.sendMessage("§c[NantiDDoS] §eAttack detected: §c" + type.getName() + 
                                " §efrom §c" + ips.size() + " §eIPs");
             }
+        }
+        
+        // Send external notification
+        NotificationManager notificationManager = plugin.getNotificationManager();
+        if (notificationManager != null && notificationManager.isEnabled()) {
+            Set<String> ipSet = new HashSet<>(ips);
+            AlertLevel alertLevel = AlertLevel.fromRiskScore(getCurrentThreatLevel());
+            notificationManager.notifyAttack(type, ipSet, alertLevel);
         }
     }
     

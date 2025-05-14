@@ -41,11 +41,11 @@ public class PacketMonitor implements Listener {
     private boolean autobanEnabled;
     private boolean intelligentFiltering;
     
-    private enum PacketCategory {
+    public enum PacketCategory {
         MOVEMENT, INTERACTION, INVENTORY, CHAT, OTHER
     }
     
-    private enum ThreatLevel {
+    public enum ThreatLevel {
         NONE(0), LOW(1), MEDIUM(2), HIGH(3), CRITICAL(4);
         
         private final int level;
@@ -57,6 +57,13 @@ public class PacketMonitor implements Listener {
         public int getLevel() {
             return level;
         }
+    }
+    
+    public interface PacketDataInfo {
+        String getPlayerName();
+        ThreatLevel getThreatLevel();
+        int getTotalPacketsLastInterval();
+        Map<PacketCategory, Integer> getPacketCounts();
     }
     
     public PacketMonitor(Nantiddos plugin, ConnectionTracker connectionTracker, IPManager ipManager) {
@@ -351,12 +358,20 @@ public class PacketMonitor implements Listener {
         packetDataMap.remove(event.getPlayer().getUniqueId());
     }
     
-    public Map<UUID, PlayerPacketData> getPacketDataMap() {
-        return packetDataMap;
+    public Map<UUID, PacketDataInfo> getPacketDataMap() {
+        Map<UUID, PacketDataInfo> result = new ConcurrentHashMap<>();
+        for (Map.Entry<UUID, PlayerPacketData> entry : packetDataMap.entrySet()) {
+            result.put(entry.getKey(), entry.getValue());
+        }
+        return result;
     }
     
-    public Map<String, IpPacketStatistics> getIpStatisticsMap() {
-        return ipStatisticsMap;
+    public Map<String, IpPacketInfo> getIpStatisticsMap() {
+        Map<String, IpPacketInfo> result = new ConcurrentHashMap<>();
+        for (Map.Entry<String, IpPacketStatistics> entry : ipStatisticsMap.entrySet()) {
+            result.put(entry.getKey(), entry.getValue());
+        }
+        return result;
     }
     
     public boolean isPacketMonitoringFullyAvailable() {
@@ -377,7 +392,7 @@ public class PacketMonitor implements Listener {
         return count;
     }
     
-    private class PlayerPacketData {
+    private class PlayerPacketData implements PacketDataInfo {
         private final String playerName;
         private final Map<PacketCategory, Integer> packetCounts = new EnumMap<>(PacketCategory.class);
         private final Map<PacketCategory, Integer> totalCounts = new EnumMap<>(PacketCategory.class);
@@ -427,6 +442,7 @@ public class PacketMonitor implements Listener {
             lastResetTime = System.currentTimeMillis();
         }
         
+        @Override
         public int getTotalPacketsLastInterval() {
             int total = 0;
             for (Integer count : packetCounts.values()) {
@@ -435,6 +451,7 @@ public class PacketMonitor implements Listener {
             return total;
         }
         
+        @Override
         public Map<PacketCategory, Integer> getPacketCounts() {
             return new EnumMap<>(packetCounts);
         }
@@ -451,10 +468,12 @@ public class PacketMonitor implements Listener {
             throttleCount++;
         }
         
+        @Override
         public String getPlayerName() {
             return playerName;
         }
         
+        @Override
         public ThreatLevel getThreatLevel() {
             return threatLevel;
         }
@@ -476,7 +495,11 @@ public class PacketMonitor implements Listener {
         }
     }
     
-    private class IpPacketStatistics {
+    public interface IpPacketInfo {
+        double getAverageThreatLevel();
+    }
+    
+    private class IpPacketStatistics implements IpPacketInfo {
         private int playerCount;
         private int packetCount;
         private int threatLevelSum;
@@ -496,6 +519,7 @@ public class PacketMonitor implements Listener {
             intervals++;
         }
         
+        @Override
         public double getAverageThreatLevel() {
             return intervals > 0 ? (double) threatLevelSum / intervals : 0;
         }

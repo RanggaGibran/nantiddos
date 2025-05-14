@@ -49,11 +49,27 @@ protection:
         decay-rate: 1
 
 notifications:
-  notify-admins: true
-  show-ip-addresses: true
-  log-to-console: true
-  log-level: WARNING
-
+  enabled: false
+  min-level: HIGH
+  rate-limit-seconds: 60
+  events:
+    attack: true
+    blacklist: true
+    protection-toggle: false
+    config-change: false
+  discord:
+    enabled: false
+    webhook-url: ""
+  email:
+    enabled: false
+    host: smtp.gmail.com
+    port: 587
+    username: ""
+    password: ""
+    from: nantiddos@example.com
+    recipients:
+      - admin@example.com
+  
 messages:
   kick-message: "§c§lConnection throttled! Please wait before reconnecting."
   admin-notification: "§c[NantiDDoS] §eBlocked connection attempt from §c{ip} §e(rate limit exceeded)"
