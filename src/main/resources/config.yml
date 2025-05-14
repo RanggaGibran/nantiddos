@@ -8,6 +8,10 @@ protection:
     cleanup-interval-minutes: 15
     data-expiration-minutes: 60
     intelligent-throttling: true
+  ip-management:
+    auto-save: true
+    auto-save-interval-minutes: 10
+    block-by-default: false
 
 notifications:
   notify-admins: true
@@ -18,3 +22,4 @@ notifications:
 messages:
   kick-message: "§c§lConnection throttled! Please wait before reconnecting."
   admin-notification: "§c[NantiDDoS] §eBlocked connection attempt from §c{ip} §e(rate limit exceeded)"
+  blacklisted-ip-message: "§c§lYour IP address is blacklisted from this server."

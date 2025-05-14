@@ -2,6 +2,7 @@ package id.nantiddos;
 
 import id.nantiddos.protection.ConnectionTracker;
 import id.nantiddos.protection.ConnectionTracker.ConnectionType;
+import id.nantiddos.protection.IPManager;
 
 import java.io.File;
 import java.util.logging.Logger;
@@ -30,12 +31,14 @@ public class Nantiddos extends JavaPlugin implements Listener {
     private File dataFolder;
     
     private ConnectionTracker connectionTracker;
+    private IPManager ipManager;
     
     private int maxConnectionsPerSecond;
     private int connectionTimeout;
     private boolean enableProtection;
     private boolean notifyAdmins;
     private String kickMessage;
+    private String blacklistedMessage;
     
     @Override
     public void onEnable() {
@@ -51,6 +54,7 @@ public class Nantiddos extends JavaPlugin implements Listener {
         registerListeners();
         
         connectionTracker = new ConnectionTracker(this);
+        ipManager = new IPManager(this);
         
         logger.info("NantiDDoS v" + getDescription().getVersion() + " enabled successfully");
         logger.info("Protection status: " + (enableProtection ? "ENABLED" : "DISABLED"));
@@ -60,6 +64,10 @@ public class Nantiddos extends JavaPlugin implements Listener {
     public void onDisable() {
         if (connectionTracker != null) {
             connectionTracker.shutdown();
+        }
+        
+        if (ipManager != null) {
+            ipManager.shutdown();
         }
         
         logger.info("NantiDDoS disabled");
@@ -84,6 +92,7 @@ public class Nantiddos extends JavaPlugin implements Listener {
         enableProtection = config.getBoolean("protection.enabled", true);
         notifyAdmins = config.getBoolean("notifications.notify-admins", true);
         kickMessage = config.getString("messages.kick-message", "§c§lConnection throttled! Please wait before reconnecting.");
+        blacklistedMessage = config.getString("messages.blacklisted-ip-message", "§c§lYour IP address is blacklisted from this server.");
         
         saveConfig();
     }
@@ -116,6 +125,12 @@ public class Nantiddos extends JavaPlugin implements Listener {
                 case "clear":
                     clearData(sender);
                     break;
+                case "whitelist":
+                    handleWhitelistCommand(sender, args);
+                    break;
+                case "blacklist":
+                    handleBlacklistCommand(sender, args);
+                    break;
                 default:
                     showHelp(sender);
                     break;
@@ -123,6 +138,114 @@ public class Nantiddos extends JavaPlugin implements Listener {
             
             return true;
         });
+    }
+    
+    private void handleWhitelistCommand(CommandSender sender, String[] args) {
+        if (args.length < 2) {
+            sender.sendMessage("§c§lUsage: §e/nantiddos whitelist <add|remove|list> [ip]");
+            return;
+        }
+        
+        switch (args[1].toLowerCase()) {
+            case "add":
+                if (args.length < 3) {
+                    sender.sendMessage("§c§lUsage: §e/nantiddos whitelist add <ip|cidr>");
+                    return;
+                }
+                
+                String ipToWhitelist = args[2];
+                if (ipManager.addToWhitelist(ipToWhitelist)) {
+                    sender.sendMessage("§aAdded §e" + ipToWhitelist + " §ato whitelist");
+                } else {
+                    sender.sendMessage("§cInvalid IP or CIDR notation: §e" + ipToWhitelist);
+                }
+                break;
+                
+            case "remove":
+                if (args.length < 3) {
+                    sender.sendMessage("§c§lUsage: §e/nantiddos whitelist remove <ip|cidr>");
+                    return;
+                }
+                
+                String ipToRemove = args[2];
+                if (ipManager.removeFromWhitelist(ipToRemove)) {
+                    sender.sendMessage("§aRemoved §e" + ipToRemove + " §afrom whitelist");
+                } else {
+                    sender.sendMessage("§cIP or CIDR not found in whitelist: §e" + ipToRemove);
+                }
+                break;
+                
+            case "list":
+                sender.sendMessage("§6========== §eWhitelisted IPs §6==========");
+                for (String ip : ipManager.getWhitelistedIps()) {
+                    sender.sendMessage("§a" + ip);
+                }
+                
+                sender.sendMessage("§6========== §eWhitelisted Networks §6==========");
+                for (String network : ipManager.getWhitelistedNetworks()) {
+                    sender.sendMessage("§a" + network);
+                }
+                break;
+                
+            default:
+                sender.sendMessage("§c§lUnknown subcommand: §e" + args[1]);
+                sender.sendMessage("§c§lUsage: §e/nantiddos whitelist <add|remove|list> [ip]");
+                break;
+        }
+    }
+    
+    private void handleBlacklistCommand(CommandSender sender, String[] args) {
+        if (args.length < 2) {
+            sender.sendMessage("§c§lUsage: §e/nantiddos blacklist <add|remove|list> [ip]");
+            return;
+        }
+        
+        switch (args[1].toLowerCase()) {
+            case "add":
+                if (args.length < 3) {
+                    sender.sendMessage("§c§lUsage: §e/nantiddos blacklist add <ip|cidr>");
+                    return;
+                }
+                
+                String ipToBlacklist = args[2];
+                if (ipManager.addToBlacklist(ipToBlacklist)) {
+                    sender.sendMessage("§aAdded §e" + ipToBlacklist + " §ato blacklist");
+                } else {
+                    sender.sendMessage("§cInvalid IP or CIDR notation: §e" + ipToBlacklist);
+                }
+                break;
+                
+            case "remove":
+                if (args.length < 3) {
+                    sender.sendMessage("§c§lUsage: §e/nantiddos blacklist remove <ip|cidr>");
+                    return;
+                }
+                
+                String ipToRemove = args[2];
+                if (ipManager.removeFromBlacklist(ipToRemove)) {
+                    sender.sendMessage("§aRemoved §e" + ipToRemove + " §afrom blacklist");
+                } else {
+                    sender.sendMessage("§cIP or CIDR not found in blacklist: §e" + ipToRemove);
+                }
+                break;
+                
+            case "list":
+                sender.sendMessage("§6========== §eBlacklisted IPs §6==========");
+                for (String ip : ipManager.getBlacklistedIps()) {
+                    sender.sendMessage("§c" + ip);
+                }
+                
+                sender.sendMessage("§6========== §eBlacklisted Networks §6==========");
+                for (String network : ipManager.getBlacklistedNetworks()) {
+                    sender.sendMessage("§c" + network);
+                }
+                break;
+                
+            default:
+                sender.sendMessage("§c§lUnknown subcommand: §e" + args[1]);
+                sender.sendMessage("§c§lUsage: §e/nantiddos blacklist <add|remove|list> [ip]");
+                break;
+        }
     }
     
     private void registerListeners() {
@@ -136,6 +259,8 @@ public class Nantiddos extends JavaPlugin implements Listener {
         sender.sendMessage("§e/nantiddos enable §7- Enable protection");
         sender.sendMessage("§e/nantiddos disable §7- Disable protection");
         sender.sendMessage("§e/nantiddos clear §7- Clear connection data");
+        sender.sendMessage("§e/nantiddos whitelist <add|remove|list> [ip] §7- Manage whitelist");
+        sender.sendMessage("§e/nantiddos blacklist <add|remove|list> [ip] §7- Manage blacklist");
     }
     
     private void reloadConfiguration(CommandSender sender) {
@@ -144,6 +269,10 @@ public class Nantiddos extends JavaPlugin implements Listener {
         
         if (connectionTracker != null) {
             connectionTracker.loadConfig();
+        }
+        
+        if (ipManager != null) {
+            ipManager.loadConfig();
         }
         
         sender.sendMessage("§aNantiDDoS configuration reloaded successfully!");
@@ -158,6 +287,13 @@ public class Nantiddos extends JavaPlugin implements Listener {
         if (connectionTracker != null) {
             sender.sendMessage("§eTracked IPs: §a" + connectionTracker.getConnectionsCount());
             sender.sendMessage("§eSuspicious IPs: §c" + connectionTracker.getSuspiciousConnectionsCount());
+        }
+        
+        if (ipManager != null) {
+            sender.sendMessage("§eWhitelisted IPs: §a" + ipManager.getWhitelistedIps().size());
+            sender.sendMessage("§eWhitelisted Networks: §a" + ipManager.getWhitelistedNetworks().size());
+            sender.sendMessage("§eBlacklisted IPs: §c" + ipManager.getBlacklistedIps().size());
+            sender.sendMessage("§eBlacklisted Networks: §c" + ipManager.getBlacklistedNetworks().size());
         }
     }
     
@@ -185,6 +321,12 @@ public class Nantiddos extends JavaPlugin implements Listener {
     public void onServerPing(ServerListPingEvent event) {
         if (!enableProtection) return;
         
+        if (ipManager != null && ipManager.isBlacklisted(event.getAddress())) {
+            event.setMaxPlayers(0);
+            event.setMotd("§c§lYou are blacklisted from this server.");
+            return;
+        }
+        
         if (connectionTracker != null) {
             connectionTracker.trackConnection(event.getAddress(), ConnectionType.SERVER_PING);
             
@@ -198,6 +340,12 @@ public class Nantiddos extends JavaPlugin implements Listener {
     @EventHandler(priority = EventPriority.LOWEST)
     public void onPlayerPreLogin(AsyncPlayerPreLoginEvent event) {
         if (!enableProtection) return;
+        
+        if (ipManager != null && ipManager.isBlacklisted(event.getAddress())) {
+            event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_BANNED, blacklistedMessage);
+            logger.warning("Blocked login from blacklisted IP: " + event.getAddress().getHostAddress());
+            return;
+        }
         
         if (connectionTracker != null) {
             connectionTracker.trackConnection(event.getAddress(), ConnectionType.LOGIN_ATTEMPT);
