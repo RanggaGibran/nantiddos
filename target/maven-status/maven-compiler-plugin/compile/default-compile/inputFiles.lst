@@ -1,6 +1,8 @@
 d:\Plugin Nusa\nantiddos\src\main\java\id\nantiddos\notification\NotificationManager.java
 d:\Plugin Nusa\nantiddos\src\main\java\id\nantiddos\protection\PacketMonitor.java
 d:\Plugin Nusa\nantiddos\src\main\java\id\nantiddos\Nantiddos.java
+d:\Plugin Nusa\nantiddos\src\main\java\id\nantiddos\analytics\SecurityMetrics.java
+d:\Plugin Nusa\nantiddos\src\main\java\id\nantiddos\network\ProxyIntegration.java
 d:\Plugin Nusa\nantiddos\src\main\java\id\nantiddos\dashboard\SecurityConsole.java
 d:\Plugin Nusa\nantiddos\src\main\java\id\nantiddos\protection\AttackDetector.java
 d:\Plugin Nusa\nantiddos\src\main\java\id\nantiddos\protection\ConnectionTracker.java

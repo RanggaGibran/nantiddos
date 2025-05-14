@@ -8,7 +8,6 @@ import id.nantiddos.protection.AttackDetector.AttackType;
 import id.nantiddos.protection.ConnectionTracker;
 import id.nantiddos.protection.IPManager;
 import id.nantiddos.protection.PacketMonitor;
-import id.nantiddos.proxy.ProxyIntegration;
 
 import java.text.SimpleDateFormat;
 import java.time.LocalDate;
@@ -136,9 +135,6 @@ public class SecurityConsole implements Listener {
                     openReportViewPage(player, reportPath);
                 }
                 break;
-            case "network":
-                openNetworkPage(player);
-                break;
         }
     }
     
@@ -214,13 +210,6 @@ public class SecurityConsole implements Listener {
             "§eClick to view analytics dashboard");
         inventory.setItem(40, analyticsButton);
         
-        ItemStack networkButton = createGuiItem(Material.NETHER_STAR, "§d§lNetwork Protection", 
-            "§7Manage cross-server protection",
-            "§7Status: " + (plugin.isNetworkProtectionEnabled() ? "§aENABLED" : "§cDISABLED"),
-            "",
-            "§eClick to manage");
-        inventory.setItem(42, networkButton);
-        
         ItemStack kickButton = createGuiItem(Material.REDSTONE_BLOCK, "§c§lKick Suspicious Players", 
             "§7Kick players with suspicious packet activity",
             "§7This will immediately remove players",
@@ -278,109 +267,103 @@ public class SecurityConsole implements Listener {
             "",
             "§eClick to view analytics dashboard");
         inventory.setItem(40, analyticsButton);
-        
-        ItemStack networkButton = createGuiItem(Material.NETHER_STAR, "§d§lNetwork Protection", 
-            "§7Manage cross-server protection",
-            "§7Status: " + (plugin.isNetworkProtectionEnabled() ? "§aENABLED" : "§cDISABLED"),
-            "",
-            "§eClick to manage");
-        inventory.setItem(42, networkButton);
     }
     
-    private void openNetworkPage(Player player) {
-        playerPages.put(player.getUniqueId(), "network");
+    private void openAnalyticsPage(Player player, int page) {
+        playerPages.put(player.getUniqueId(), "analytics");
+        analyticsPages.put(player.getUniqueId(), page);
         
-        Inventory inventory = Bukkit.createInventory(null, 54, "§8§lNetwork Protection");
+        Inventory inventory = Bukkit.createInventory(null, 54, "§8§lSecurity Analytics Dashboard");
         
-        ProxyIntegration proxyIntegration = plugin.getProxyIntegration();
-        boolean isNetworkEnabled = plugin.isNetworkProtectionEnabled();
-        
-        ItemStack header = createGuiItem(Material.NETHER_STAR, "§d§lNetwork Protection", 
-            "§7Manage cross-server protection",
-            "§7Status: " + (isNetworkEnabled ? "§aENABLED" : "§cDISABLED"));
+        ItemStack header = createGuiItem(Material.KNOWLEDGE_BOOK, "§d§lSecurity Analytics", 
+            "§7View detailed security statistics and reports",
+            "§7Generated: §f" + dateFormat.format(new Date()));
         inventory.setItem(4, header);
         
-        if (!isNetworkEnabled) {
-            ItemStack notEnabled = createGuiItem(Material.BARRIER, "§c§lNetwork Protection Disabled", 
-                "§7Network protection is not enabled in config.yml",
-                "§7Set network.enabled to true to enable");
-            inventory.setItem(22, notEnabled);
-        } else {
-            String serverId = plugin.getConfig().getString("network.server-id", "Not set");
-            String networkId = plugin.getConfig().getString("network.network-id", "default");
-            
-            ItemStack serverInfo = createGuiItem(Material.NAME_TAG, "§e§lServer Information", 
-                "§7Server ID: §f" + serverId,
-                "§7Network ID: §f" + networkId,
-                "§7Role: " + (proxyIntegration.isMasterServer() ? "§6MASTER" : "§7NODE"));
-            inventory.setItem(19, serverInfo);
-            
-            ItemStack syncStatus = createGuiItem(Material.CLOCK, "§e§lSync Status", 
-                "§7Sync Blacklist: " + (plugin.getConfig().getBoolean("network.sync-blacklist", true) ? "§aYes" : "§cNo"),
-                "§7Sync Whitelist: " + (plugin.getConfig().getBoolean("network.sync-whitelist", true) ? "§aYes" : "§cNo"),
-                "§7Sync Attack Data: " + (plugin.getConfig().getBoolean("network.sync-attack-data", true) ? "§aYes" : "§cNo"));
-            inventory.setItem(21, syncStatus);
-            
-            Set<String> servers = proxyIntegration.getNetworkServers();
-            ItemStack serverList = createGuiItem(Material.MAP, "§e§lConnected Servers", 
-                "§7Total servers: §f" + servers.size());
-            inventory.setItem(23, serverList);
-            
-            if (proxyIntegration.isMasterServer()) {
-                ItemStack masterStatus = createGuiItem(Material.GOLD_BLOCK, "§6§lMaster Server", 
-                    "§7This server is the master server",
-                    "§7All network synchronization runs through this server",
-                    "",
-                    "§eClick to force sync");
-                inventory.setItem(25, masterStatus);
-            } else {
-                String masterId = proxyIntegration.getMasterServerId();
-                ItemStack nodeStatus = createGuiItem(Material.IRON_BLOCK, "§7§lNode Server", 
-                    "§7This server is a node server",
-                    "§7Master server: §f" + (masterId.isEmpty() ? "None" : masterId),
-                    "",
-                    "§cClick to become master (use with caution!)");
-                inventory.setItem(25, nodeStatus);
-            }
-            
-            int slot = 28;
-            for (String serverName : servers) {
-                if (slot >= 45) break;
-                
-                boolean isMaster = serverName.equals(proxyIntegration.getMasterServerId());
-                Material material = isMaster ? Material.BEACON : Material.END_PORTAL_FRAME;
-                
-                ItemStack serverItem = createGuiItem(material, 
-                    (isMaster ? "§6§l" : "§f§l") + serverName, 
-                    "§7Server ID: §f" + serverName,
-                    "§7Role: " + (isMaster ? "§6MASTER" : "§7NODE"),
-                    "",
-                    "§eClick for details");
-                
-                inventory.setItem(slot++, serverItem);
-            }
-            
-            if (servers.isEmpty()) {
-                ItemStack noServers = createGuiItem(Material.BARRIER, "§c§lNo Servers Connected", 
-                    "§7No other servers detected in the network",
-                    "§7Proxy integration may not be working properly");
-                inventory.setItem(31, noServers);
+        Map<String, Object> data = securityMetrics.generateAnalyticsData();
+        
+        int currentThreatLevel = (int) data.getOrDefault("currentThreatLevel", 0);
+        AlertLevel alertLevel = attackDetector.getSystemAlertLevel();
+        String alertColor = alertLevel.getColor();
+        
+        Material trendMaterial = Material.GOLDEN_SWORD;
+        String trendDirection = "§eStable";
+        
+        if (data.containsKey("threatTrend")) {
+            int trend = (int) data.get("threatTrend");
+            if (trend > 10) {
+                trendMaterial = Material.DIAMOND_SWORD;
+                trendDirection = "§c▲ Increasing";
+            } else if (trend < -10) {
+                trendMaterial = Material.WOODEN_SWORD;
+                trendDirection = "§a▼ Decreasing";
             }
         }
         
-        ItemStack syncButton = createGuiItem(Material.COMPASS, "§a§lForce Sync", 
-            "§7Force immediate data synchronization",
-            "§7This will push all security data to other servers",
+        ItemStack threatOverview = createGuiItem(trendMaterial, "§e§lThreat Overview", 
+            "§7Current Threat Level: " + alertColor + alertLevel.name(),
+            "§7Threat Score: §f" + currentThreatLevel + "/100",
+            "§7Trend: " + trendDirection,
+            "§7Active Attack Sources: §c" + data.getOrDefault("activeAttackSources", 0),
             "",
-            "§eClick to force sync");
-        inventory.setItem(47, syncButton);
+            "§eClick for detailed threat analysis");
+        inventory.setItem(10, threatOverview);
         
-        ItemStack settingsButton = createGuiItem(Material.COMMAND_BLOCK, "§e§lNetwork Settings", 
-            "§7Configure network protection settings",
-            "§7Adjust synchronization behavior",
+        ItemStack attackStats = createGuiItem(Material.FIRE_CHARGE, "§c§lAttack Statistics", 
+            "§7Total Attacks (7d): §c" + data.getOrDefault("totalAttacks", 0),
+            "§7High Severity Attacks: §c" + data.getOrDefault("highSeverityAttacks", 0),
+            "§7Most Common Attack: §e" + getMostCommonAttackType(data),
             "",
-            "§eClick to configure");
-        inventory.setItem(51, settingsButton);
+            "§eClick to view attack types");
+        inventory.setItem(12, attackStats);
+        
+        ItemStack connectionStats = createGuiItem(Material.COMPASS, "§b§lConnection Statistics", 
+            "§7Total Connections (7d): §f" + data.getOrDefault("totalConnections", 0),
+            "§7Max Connections/sec: §f" + data.getOrDefault("maxConnections", 0),
+            "§7Average Connections/sec: §f" + getFormattedAverage(data, "avgConnections"),
+            "§7Suspicious Connections: §c" + connectionTracker.getSuspiciousConnectionsCount(),
+            "",
+            "§eClick for connection history chart");
+        inventory.setItem(14, connectionStats);
+        
+        ItemStack ipStats = createGuiItem(Material.MAP, "§a§lGeographic Analysis", 
+            "§7Total Unique IPs: §f" + connectionTracker.getConnectionsCount(),
+            "§7Blacklisted IPs: §c" + ipManager.getBlacklistedIps().size(),
+            "§7Whitelisted IPs: §a" + ipManager.getWhitelistedIps().size(),
+            "",
+            "§eClick to view IP threat map");
+        inventory.setItem(16, ipStats);
+        
+        ItemStack dailyReport = createGuiItem(Material.PAPER, "§e§lDaily Report", 
+            "§7View today's security summary",
+            "§7Contains hourly statistics, attack patterns,",
+            "§7and security recommendations",
+            "",
+            "§eClick to view today's report");
+        inventory.setItem(29, dailyReport);
+        
+        ItemStack weeklyReport = createGuiItem(Material.BOOK, "§6§lWeekly Report", 
+            "§7View this week's security trends",
+            "§7Includes daily summaries, attack patterns,",
+            "§7and long-term security analysis",
+            "",
+            "§eClick to view weekly report");
+        inventory.setItem(31, weeklyReport);
+        
+        ItemStack reportsArchive = createGuiItem(Material.BOOKSHELF, "§d§lReports Archive", 
+            "§7Browse all security reports",
+            "§7Access historical security data",
+            "§7and custom report generation",
+            "",
+            "§eClick to browse reports");
+        inventory.setItem(33, reportsArchive);
+        
+        ItemStack generateReport = createGuiItem(Material.WRITABLE_BOOK, "§b§lGenerate Custom Report", 
+            "§7Create a custom security report",
+            "§7Specify date range and report type",
+            "",
+            "§eClick to generate report");
+        inventory.setItem(40, generateReport);
         
         ItemStack backButton = createGuiItem(Material.ARROW, "§c§lBack", 
             "§7Return to main dashboard");
@@ -391,56 +374,392 @@ public class SecurityConsole implements Listener {
         activeConsoles.put(player.getUniqueId(), inventory);
     }
     
-    private void handleNetworkPageClick(Player player, int slot, ItemStack clickedItem) {
-        ProxyIntegration proxyIntegration = plugin.getProxyIntegration();
+    private void openReportsPage(Player player, int page) {
+        playerPages.put(player.getUniqueId(), "reports");
         
-        if (slot == 49) { // Back button
-            Inventory dashboard = createMainDashboard(player);
-            player.openInventory(dashboard);
-            activeConsoles.put(player.getUniqueId(), dashboard);
-            playerPages.put(player.getUniqueId(), "main");
-            return;
-        }
+        Inventory inventory = Bukkit.createInventory(null, 54, "§8§lSecurity Reports Archive");
         
-        if (!plugin.isNetworkProtectionEnabled()) {
-            player.sendMessage("§c§lNetwork protection is not enabled!");
-            player.sendMessage("§cEnable it in the config.yml file by setting network.enabled to true");
-            return;
-        }
+        ItemStack header = createGuiItem(Material.BOOKSHELF, "§d§lSecurity Reports Archive", 
+            "§7Browse and access all security reports",
+            "§7Page: §f" + (page + 1));
+        inventory.setItem(4, header);
         
-        switch (slot) {
-            case 25: // Master/Node status
-                if (proxyIntegration.isMasterServer()) {
-                    player.sendMessage("§e§lForcing data synchronization...");
-                    Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
-                        proxyIntegration.loadConfig();
-                    });
-                } else {
-                    player.closeInventory();
-                    player.sendMessage("§c§lWARNING: §eYou are about to make this server the master server!");
-                    player.sendMessage("§eThis will override the current master server.");
-                    player.sendMessage("§eTo confirm, type: §6/nantiddos network master force");
-                }
-                break;
+        List<Map<String, String>> reports = securityMetrics.getReportHistory();
+        
+        if (reports.isEmpty()) {
+            ItemStack noReports = createGuiItem(Material.BARRIER, "§c§lNo Reports Available", 
+                "§7No security reports have been generated yet",
+                "§7Reports are generated automatically or manually");
+            inventory.setItem(22, noReports);
+        } else {
+            int startIndex = page * 36;
+            int endIndex = Math.min(startIndex + 36, reports.size());
+            int slot = 9;
+            
+            for (int i = startIndex; i < endIndex; i++) {
+                Map<String, String> report = reports.get(i);
                 
-            case 47: // Force sync
-                if (proxyIntegration.isMasterServer()) {
-                    player.sendMessage("§a§lForcing network data synchronization...");
-                    Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
-                        proxyIntegration.loadConfig();
-                    });
-                } else {
-                    player.sendMessage("§c§lOnly the master server can force a synchronization!");
-                    player.sendMessage("§cCurrent master: " + proxyIntegration.getMasterServerId());
+                String fileName = report.getOrDefault("fileName", report.getOrDefault("path", "Unknown"));
+                if (fileName.contains("\\")) {
+                    fileName = fileName.substring(fileName.lastIndexOf('\\') + 1);
                 }
-                break;
+                String date = report.getOrDefault("date", report.getOrDefault("timestamp", "Unknown"));
+                String size = report.getOrDefault("size", "Unknown");
+                String filePath = report.getOrDefault("path", "");
                 
-            case 51: // Settings
-                player.closeInventory();
-                player.performCommand("nantiddos network status");
-                player.sendMessage("§eUse §6/nantiddos network §eto manage network settings");
-                break;
+                Material material;
+                if (fileName.contains("daily")) {
+                    material = Material.PAPER;
+                } else if (fileName.contains("weekly")) {
+                    material = Material.BOOK;
+                } else if (fileName.contains("custom")) {
+                    material = Material.WRITABLE_BOOK;
+                } else {
+                    material = Material.MAP;
+                }
+                
+                ItemStack reportItem = createGuiItem(material, "§e§l" + fileName, 
+                    "§7Date: §f" + date,
+                    "§7Size: §f" + size,
+                    "",
+                    "§eClick to view report details");
+                
+                inventory.setItem(slot++, reportItem);
+                
+                if (slot >= 45) break;
+            }
+            
+            if (page > 0) {
+                ItemStack prevPage = createGuiItem(Material.ARROW, "§e§lPrevious Page", 
+                    "§7Go to page " + page);
+                inventory.setItem(45, prevPage);
+            }
+            
+            if (endIndex < reports.size()) {
+                ItemStack nextPage = createGuiItem(Material.ARROW, "§e§lNext Page", 
+                    "§7Go to page " + (page + 2));
+                inventory.setItem(53, nextPage);
+            }
         }
+        
+        ItemStack backButton = createGuiItem(Material.BARRIER, "§c§lBack", 
+            "§7Return to analytics dashboard");
+        inventory.setItem(49, backButton);
+        
+        fillEmptySlots(inventory);
+        player.openInventory(inventory);
+        activeConsoles.put(player.getUniqueId(), inventory);
+    }
+    
+    private void openAttackTypesPage(Player player) {
+        playerPages.put(player.getUniqueId(), "attackTypes");
+        
+        Inventory inventory = Bukkit.createInventory(null, 54, "§8§lAttack Type Analysis");
+        
+        ItemStack header = createGuiItem(Material.FIRE_CHARGE, "§c§lAttack Type Analysis", 
+            "§7View detailed statistics by attack type",
+            "§7Generated: §f" + dateFormat.format(new Date()));
+        inventory.setItem(4, header);
+        
+        Map<String, Object> data = securityMetrics.generateAnalyticsData();
+        
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> attackTypes = (List<Map<String, Object>>) data.get("attackTypes");
+        
+        if (attackTypes != null && !attackTypes.isEmpty()) {
+            int slot = 10;
+            for (Map<String, Object> attackType : attackTypes) {
+                String type = (String) attackType.get("type");
+                int count = ((Number) attackType.get("count")).intValue();
+                
+                Material material;
+                String color;
+                
+                if (type.contains("CONNECTION_FLOOD")) {
+                    material = Material.BLUE_CONCRETE;
+                    color = "§9";
+                } else if (type.contains("LOGIN_FLOOD")) {
+                    material = Material.CYAN_CONCRETE;
+                    color = "§3";
+                } else if (type.contains("PING_FLOOD")) {
+                    material = Material.LIGHT_BLUE_CONCRETE;
+                    color = "§b";
+                } else if (type.contains("PACKET_FLOOD")) {
+                    material = Material.RED_CONCRETE;
+                    color = "§c";
+                } else if (type.contains("BOT_NETWORK")) {
+                    material = Material.ORANGE_CONCRETE;
+                    color = "§6";
+                } else if (type.contains("DISTRIBUTED")) {
+                    material = Material.PURPLE_CONCRETE;
+                    color = "§5";
+                } else {
+                    material = Material.GRAY_CONCRETE;
+                    color = "§7";
+                }
+                
+                ItemStack attackItem = createGuiItem(material, color + "§l" + type, 
+                    "§7Total Occurrences: §c" + count,
+                    "§7Severity: §e" + getSeverityForAttackType(type),
+                    "",
+                    "§eClick to view attack details");
+                
+                inventory.setItem(slot++, attackItem);
+                
+                if ((slot - 10) % 9 == 7) {
+                    slot += 3;
+                }
+                
+                if (slot >= 44) break;
+            }
+        } else {
+            ItemStack noAttacks = createGuiItem(Material.BARRIER, "§a§lNo Attacks Detected", 
+                "§7No attack data available",
+                "§7Your server appears to be secure");
+            inventory.setItem(22, noAttacks);
+        }
+        
+        ItemStack backButton = createGuiItem(Material.ARROW, "§c§lBack", 
+            "§7Return to analytics dashboard");
+        inventory.setItem(49, backButton);
+        
+        fillEmptySlots(inventory);
+        player.openInventory(inventory);
+        activeConsoles.put(player.getUniqueId(), inventory);
+    }
+    
+    private void openThreatMapPage(Player player) {
+        playerPages.put(player.getUniqueId(), "threatMap");
+        
+        Inventory inventory = Bukkit.createInventory(null, 54, "§8§lIP Threat Map");
+        
+        ItemStack header = createGuiItem(Material.MAP, "§a§lIP Threat Map", 
+            "§7Visual representation of threat sources",
+            "§7Generated: §f" + dateFormat.format(new Date()));
+        inventory.setItem(4, header);
+        
+        Map<String, AttackDetector.AttackData> attackDataMap = attackDetector.getAttackDataMap();
+        Map<String, ConnectionTracker.ConnectionData> connectionMap = connectionTracker.getConnectionMap();
+        Map<String, Integer> botScores = connectionTracker.getBotScores();
+        
+        if (attackDataMap.isEmpty() && connectionMap.isEmpty()) {
+            ItemStack noData = createGuiItem(Material.BARRIER, "§a§lNo Threat Data Available", 
+                "§7No threat sources identified");
+            inventory.setItem(22, noData);
+        } else {
+            int slot = 9;
+            
+            List<Map.Entry<String, AttackDetector.AttackData>> sortedAttacks = new ArrayList<>(attackDataMap.entrySet());
+            sortedAttacks.sort((e1, e2) -> e2.getValue().getCurrentRiskScore() - e1.getValue().getCurrentRiskScore());
+            
+            for (Map.Entry<String, AttackDetector.AttackData> entry : sortedAttacks) {
+                if (slot >= 45) break;
+                
+                String ip = entry.getKey();
+                AttackDetector.AttackData data = entry.getValue();
+                int threatScore = data.getCurrentRiskScore();
+                AlertLevel alertLevel = data.getAlertLevel();
+                AttackType primaryType = data.getPrimaryAttackType();
+                
+                Material material;
+                switch (alertLevel) {
+                    case CRITICAL: material = Material.RED_CONCRETE; break;
+                    case HIGH: material = Material.ORANGE_CONCRETE; break;
+                    case MEDIUM: material = Material.YELLOW_CONCRETE; break;
+                    case LOW: material = Material.LIME_CONCRETE; break;
+                    default: material = Material.GREEN_CONCRETE; break;
+                }
+                
+                ItemStack ipItem = createGuiItem(material, alertLevel.getColor() + "§l" + ip, 
+                    "§7Threat Score: §f" + threatScore + "/100",
+                    "§7Alert Level: " + alertLevel.getColor() + alertLevel.name(),
+                    "§7Attack Type: §f" + primaryType.getName(),
+                    "§7Bot Score: §f" + botScores.getOrDefault(ip, 0),
+                    "",
+                    "§eClick to inspect this IP");
+                
+                inventory.setItem(slot++, ipItem);
+            }
+            
+            if (slot == 9) {
+                ItemStack noThreats = createGuiItem(Material.GREEN_CONCRETE, "§a§lNo Active Threats", 
+                    "§7No active threats detected",
+                    "§7Your server appears to be secure");
+                inventory.setItem(22, noThreats);
+            }
+        }
+        
+        ItemStack legend = createGuiItem(Material.BOOK, "§e§lThreat Level Legend", 
+            "§a■ §7NORMAL - No significant threat",
+            "§e■ §7LOW - Minor suspicious activity",
+            "§6■ §7MEDIUM - Suspicious traffic patterns",
+            "§c■ §7HIGH - Likely attack in progress",
+            "§4■ §7CRITICAL - Active attack confirmed");
+        inventory.setItem(48, legend);
+        
+        ItemStack backButton = createGuiItem(Material.ARROW, "§c§lBack", 
+            "§7Return to analytics dashboard");
+        inventory.setItem(49, backButton);
+        
+        fillEmptySlots(inventory);
+        player.openInventory(inventory);
+        activeConsoles.put(player.getUniqueId(), inventory);
+    }
+    
+    private void openReportViewPage(Player player, String reportPath) {
+        playerPages.put(player.getUniqueId(), "reportView");
+        reportViewers.put(player.getUniqueId(), reportPath);
+        
+        String fileName = reportPath;
+        if (fileName.contains("\\")) {
+            fileName = fileName.substring(fileName.lastIndexOf('\\') + 1);
+        }
+        
+        Inventory inventory = Bukkit.createInventory(null, 54, "§8§lReport: " + fileName);
+        
+        ItemStack header = createGuiItem(Material.PAPER, "§e§l" + fileName, 
+            "§7Report file: §f" + reportPath);
+        inventory.setItem(4, header);
+        
+        // Simplified report content visualization
+        // In real implementation, this would parse and display the actual report content
+        
+        LocalDate reportDate = LocalDate.now();
+        if (fileName.contains("daily")) {
+            try {
+                String dateStr = fileName.replace("daily_report_", "").replace(".csv", "").replace(".json", "");
+                reportDate = LocalDate.parse(dateStr);
+            } catch (Exception e) {
+                // Use current date if parsing fails
+            }
+            
+            ItemStack summaryItem = createGuiItem(Material.BOOK, "§e§lDaily Summary: " + reportDate.format(dateOnlyFormat), 
+                "§7View summary statistics for this day");
+            inventory.setItem(19, summaryItem);
+            
+            ItemStack hourlyItem = createGuiItem(Material.CLOCK, "§e§lHourly Breakdown", 
+                "§7View hourly activity patterns for this day");
+            inventory.setItem(21, hourlyItem);
+            
+            ItemStack attacksItem = createGuiItem(Material.FIRE_CHARGE, "§c§lAttack Summary", 
+                "§7View attack patterns detected on this day");
+            inventory.setItem(23, attacksItem);
+            
+            ItemStack sourcesItem = createGuiItem(Material.MAP, "§6§lAttack Sources", 
+                "§7View geographical distribution of attacks");
+            inventory.setItem(25, sourcesItem);
+            
+        } else if (fileName.contains("weekly")) {
+            try {
+                String dateRange = fileName.replace("weekly_report_", "").replace(".csv", "").replace(".json", "");
+                String startDate = dateRange.split("_to_")[0];
+                reportDate = LocalDate.parse(startDate);
+            } catch (Exception e) {
+                // Use current date if parsing fails
+            }
+            
+            ItemStack summaryItem = createGuiItem(Material.BOOK, "§6§lWeekly Summary: " + reportDate.format(dateOnlyFormat), 
+                "§7View summary statistics for this week");
+            inventory.setItem(19, summaryItem);
+            
+            ItemStack dailyItem = createGuiItem(Material.CLOCK, "§6§lDaily Breakdown", 
+                "§7View day-by-day activity patterns");
+            inventory.setItem(21, dailyItem);
+            
+            ItemStack trendsItem = createGuiItem(Material.GOLDEN_SWORD, "§6§lThreat Trends", 
+                "§7View threat level trends over the week");
+            inventory.setItem(23, trendsItem);
+            
+            ItemStack attackTypesItem = createGuiItem(Material.FIRE_CHARGE, "§c§lAttack Types", 
+                "§7View breakdown of attack types for the week");
+            inventory.setItem(25, attackTypesItem);
+        }
+        
+        ItemStack exportCsvButton = createGuiItem(Material.MAP, "§a§lExport as CSV", 
+            "§7Export this report data as CSV file");
+        inventory.setItem(38, exportCsvButton);
+        
+        ItemStack exportJsonButton = createGuiItem(Material.FILLED_MAP, "§b§lExport as JSON", 
+            "§7Export this report data as JSON file");
+        inventory.setItem(40, exportJsonButton);
+        
+        ItemStack openFileButton = createGuiItem(Material.BOOKSHELF, "§d§lOpen File Location", 
+            "§7Open the report file location",
+            "§7Path: §f" + reportPath);
+        inventory.setItem(42, openFileButton);
+        
+        ItemStack backButton = createGuiItem(Material.ARROW, "§c§lBack", 
+            "§7Return to reports page");
+        inventory.setItem(49, backButton);
+        
+        fillEmptySlots(inventory);
+        player.openInventory(inventory);
+        activeConsoles.put(player.getUniqueId(), inventory);
+    }
+    
+    private String getMostCommonAttackType(Map<String, Object> data) {
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> attackTypes = (List<Map<String, Object>>) data.get("attackTypes");
+        
+        if (attackTypes != null && !attackTypes.isEmpty()) {
+            Map<String, Object> mostCommon = attackTypes.get(0);
+            return (String) mostCommon.get("type");
+        }
+        
+        return "None";
+    }
+    
+    private String getFormattedAverage(Map<String, Object> data, String key) {
+        if (data.containsKey(key)) {
+            Object value = data.get(key);
+            if (value instanceof Number) {
+                return String.format("%.1f", ((Number) value).doubleValue());
+            }
+            return value.toString();
+        }
+        return "0";
+    }
+    
+    private String getSeverityForAttackType(String attackType) {
+        if (attackType.contains("DISTRIBUTED")) return "Critical";
+        if (attackType.contains("BOT_NETWORK")) return "High";
+        if (attackType.contains("PACKET_FLOOD")) return "High";
+        if (attackType.contains("LOGIN_FLOOD")) return "Medium";
+        if (attackType.contains("CONNECTION_FLOOD")) return "Medium";
+        if (attackType.contains("PING_FLOOD")) return "Low";
+        return "Unknown";
+    }
+    
+    private String formatBotScoreColor(int score) {
+        if (score >= 20) return "§c" + score;
+        if (score >= 10) return "§e" + score;
+        return "§a" + score;
+    }
+    
+    private void fillEmptySlots(Inventory inventory) {
+        ItemStack filler = new ItemStack(Material.GRAY_STAINED_GLASS_PANE);
+        ItemMeta meta = filler.getItemMeta();
+        meta.setDisplayName(" ");
+        filler.setItemMeta(meta);
+        
+        for (int i = 0; i < inventory.getSize(); i++) {
+            if (inventory.getItem(i) == null) {
+                inventory.setItem(i, filler);
+            }
+        }
+    }
+    
+    private ItemStack createGuiItem(Material material, String name, String... lore) {
+        ItemStack item = new ItemStack(material);
+        ItemMeta meta = item.getItemMeta();
+        meta.setDisplayName(name);
+        
+        if (lore.length > 0) {
+            meta.setLore(Arrays.asList(lore));
+        }
+        
+        item.setItemMeta(meta);
+        return item;
     }
     
     @EventHandler
@@ -485,9 +804,6 @@ public class SecurityConsole implements Listener {
                     openReportsPage(player, 0);
                 }
                 break;
-            case "network":
-                handleNetworkPageClick(player, slot, clickedItem);
-                break;
         }
     }
     
@@ -507,9 +823,6 @@ public class SecurityConsole implements Listener {
                 break;
             case 40: // Analytics
                 openAnalyticsPage(player, 0);
-                break;
-            case 42: // Network Protection
-                openNetworkPage(player);
                 break;
             case 45: // Kick suspicious
                 kickSuspiciousPlayers(player);
