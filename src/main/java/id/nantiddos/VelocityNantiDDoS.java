@@ -987,8 +987,64 @@ public class VelocityNantiDDoS {
             }
         }
         
+        // Analyze IP class distribution to detect distributed attacks
+        Map<String, List<String>> ipClassGroups = new HashMap<>();
+        
+        // Group IPs by class (first two octets)
+        for (String ip : connectionTracker.keySet()) {
+            if (botScores.getOrDefault(ip, 0) > config.getBotScoreThreshold()) {
+                String ipClass = getIpClass(ip);
+                if (!ipClassGroups.containsKey(ipClass)) {
+                    ipClassGroups.put(ipClass, new ArrayList<>());
+                }
+                ipClassGroups.get(ipClass).add(ip);
+            }
+        }
+        
+        // Check for distributed attack patterns
+        for (Map.Entry<String, List<String>> entry : ipClassGroups.entrySet()) {
+            List<String> ips = entry.getValue();
+            
+            // If 3 or more IPs from same class show attack behavior
+            if (ips.size() >= 3) {
+                // Register as a distributed attack
+                registerAttackEvent("Distributed Attack", ips);
+                
+                // Increase bot scores for all IPs in this group
+                for (String ip : ips) {
+                    updateBotScore(ip, 10);
+                }
+            }
+        }
+        
         // Update threat level based on various factors
         updateThreatLevel();
+    }
+    
+    // Helper method to extract IP class (first two octets)
+    private String getIpClass(String ip) {
+        String[] parts = ip.split("\\.");
+        if (parts.length >= 2) {
+            return parts[0] + "." + parts[1];
+        }
+        return "";
+    }
+    
+    // Register an attack event for logging and notification
+    private void registerAttackEvent(String attackType, List<String> ips) {
+        AttackRecord record = new AttackRecord(attackType, ips.get(0), 30);
+        recentAttacks.add(record);
+        
+        // Log the attack
+        logger.warn("Attack detected: " + attackType + " from " + ips.size() + " IPs");
+        
+        // Notify admin players
+        for (Player player : server.getAllPlayers()) {
+            if (player.hasPermission("nantiddos.admin")) {
+                player.sendMessage(Component.text("§c[NantiDDoS] §eAttack detected: §c" + attackType + 
+                    " §efrom §c" + ips.size() + " §eIPs"));
+            }
+        }
     }
     
     private void cleanupOldData() {
@@ -1034,6 +1090,23 @@ public class VelocityNantiDDoS {
         else if (highRateCount > 4) newThreatLevel = Math.max(newThreatLevel, 60);
         else if (highRateCount > 2) newThreatLevel = Math.max(newThreatLevel, 40);
         else if (highRateCount > 0) newThreatLevel = Math.max(newThreatLevel, 20);
+        
+        // If we have recent attacks, increase threat level
+        if (!recentAttacks.isEmpty()) {
+            long now = System.currentTimeMillis();
+            long recentThreshold = now - (5 * 60 * 1000); // Last 5 minutes
+            
+            int recentAttackCount = 0;
+            for (AttackRecord attack : recentAttacks) {
+                if (attack.timestamp > recentThreshold) {
+                    recentAttackCount++;
+                }
+            }
+            
+            if (recentAttackCount >= 5) newThreatLevel = Math.max(newThreatLevel, 90);
+            else if (recentAttackCount >= 3) newThreatLevel = Math.max(newThreatLevel, 70);
+            else if (recentAttackCount >= 1) newThreatLevel = Math.max(newThreatLevel, 50);
+        }
         
         // Smooth transitions
         if (newThreatLevel > currentThreatLevel) {
